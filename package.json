@@ -1,0 +1,63 @@
+{
+  "name": "vcdrom",
+  "version": "0.1.0",
+  "description": "VCD viewer for VS Code",
+  "main": "main.js",
+  "publisher": "WaveDrom",
+  "engines": {
+    "vscode": "^1.34.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onCommand:vcdrom.start",
+    "onLanguage:vcd"
+  ],
+  "contributes": {
+    "menus": {
+      "explorer/context": [{
+        "command": "vcdrom.start",
+        "when": "resourceLangId == vcd",
+        "group": "navigation"
+      }]
+    },
+    "languages": [{
+      "id": "vcd",
+      "extensions": [".vcd"]
+    }],
+    "commands": [
+      {
+        "command": "vcdrom.start",
+        "title": "Open VCDrom Preview"
+      }
+    ]
+  },
+  "files.associations": {
+    "*.vcd": "vcd"
+  },
+  "scripts": {
+    "test": "eslint ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wavedrom/vscode-vcdrom.git"
+  },
+  "author": "WaveDrom",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wavedrom/vscode-vcdrom/issues"
+  },
+  "homepage": "https://github.com/wavedrom/vscode-vcdrom#readme",
+  "devDependencies": {
+    "@drom/eslint-config": "^0.10.0",
+    "eslint": "^7.32.0",
+    "vcdrom": "^0.3.0"
+  },
+  "eslintConfig": {
+    "extends": "@drom/eslint-config/eslint4/node8",
+    "parserOptions": {
+      "ecmaVersion": 2020
+    }
+  }
+}
