@@ -36,8 +36,10 @@
   "files.associations": {
     "*.vcd": "vcd"
   },
+  "enableProposedApi": true,
   "scripts": {
-    "test": "eslint ."
+    "test": "eslint main.js",
+    "build": "mkdir -p app && cp node_modules/vcdrom/app/* app"
   },
   "repository": {
     "type": "git",
@@ -52,7 +54,7 @@
   "devDependencies": {
     "@drom/eslint-config": "^0.10.0",
     "eslint": "^7.32.0",
-    "vcdrom": "^0.3.0"
+    "vcdrom": "^0.4.0"
   },
   "eslintConfig": {
     "extends": "@drom/eslint-config/eslint4/node8",
