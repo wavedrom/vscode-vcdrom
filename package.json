@@ -1,6 +1,6 @@
 {
   "name": "vcdrom",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "VCD viewer for VS Code",
   "main": "main.js",
   "publisher": "drom",
@@ -16,16 +16,22 @@
   ],
   "contributes": {
     "menus": {
-      "explorer/context": [{
-        "command": "vcdrom.start",
-        "when": "resourceLangId == vcd",
-        "group": "navigation"
-      }]
+      "explorer/context": [
+        {
+          "command": "vcdrom.start",
+          "when": "resourceLangId == vcd",
+          "group": "navigation"
+        }
+      ]
     },
-    "languages": [{
-      "id": "vcd",
-      "extensions": [".vcd"]
-    }],
+    "languages": [
+      {
+        "id": "vcd",
+        "extensions": [
+          ".vcd"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "vcdrom.start",
