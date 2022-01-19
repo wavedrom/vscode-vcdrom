@@ -9,6 +9,7 @@ const getHtml = obj => {
 <html>
   <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *; style-src * 'unsafe-inline'; worker-src * data: 'unsafe-inline' 'unsafe-eval'; font-src * 'unsafe-inline' 'unsafe-eval';">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 fill=%22grey%22 font-size=%2290%22>🌊</text></svg>">
     <title>VCDrom</title>
     <link rel="preload" as="font" href="${obj.local}/iosevka-term-light.woff2" type="font/woff2" crossorigin>
@@ -16,7 +17,16 @@ const getHtml = obj => {
     <link rel="stylesheet" href="${obj.local}/vcdrom.css">
     <script src="${obj.local}/vcdrom.js"></script>
   </head>
-  <body onload="VCDrom('waveform1', '${obj.vcd}')">
+  <body>
+    <script>
+      window.addEventListener('load', () => {
+        VCDrom('waveform1', '${obj.vcd}');
+      });
+      const api = window.VsCodeApi = acquireVsCodeApi();
+      window.addEventListener('message', event => {
+        console.log(event);
+      });
+    </script>
     <div id="waveform1"></div>
   </body>
 </html>
@@ -36,6 +46,7 @@ const perPanel = extensionContext => async vcd => {
 
   const title = fileNameArr.join('.');
   const vcdDir = fullNameArr.join('/');
+  console.log(vcdDir);
   // const title = path.basename(fname);
   // const vcdDir = path.dirname(fname);
 
