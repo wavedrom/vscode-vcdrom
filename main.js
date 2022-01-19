@@ -55,7 +55,7 @@ const perPanel = extensionContext => async vcd => {
   );
 
   panel.webview.html = getHtml({
-    local: panel.webview.asWebviewUri(local),
+    local: 'https://drom.io/vcd', // panel.webview.asWebviewUri(local),
     vcd: panel.webview.asWebviewUri(vcd)
   });
 
