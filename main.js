@@ -1,6 +1,6 @@
 'use strict';
 
-const path = require('path');
+// const path = require('path');
 // const fs = require('fs');
 const vscode = require('vscode');
 
@@ -26,14 +26,24 @@ const getHtml = obj => {
 
 const perPanel = extensionContext => async vcd => {
   console.log(vcd);
-  const fname = vcd.path;
-  const title = path.basename(fname);
-  const vcdDir = path.dirname(fname);
+  const fullName = vcd.path;
+  const fullNameArr = fullName.split('/');
+  const fileName = fullNameArr.pop();
 
-  const local = vscode.Uri.file(path.join(
-    extensionContext.extensionPath,
-    'app'
-  ));
+  const fileNameArr = fileName.split('.');
+  if (fileNameArr.length > 1) {
+    fileNameArr.pop(); // remove extention
+  }
+
+  const title = fileNameArr.join('.');
+  const vcdDir = fullNameArr.join('/');
+  // const title = path.basename(fname);
+  // const vcdDir = path.dirname(fname);
+
+  const local = vscode.Uri.file(
+    // path.join(extensionContext.extensionPath, 'app')
+    extensionContext.extensionPath + '/app'
+  );
   const panel = vscode.window.createWebviewPanel(
     'vcdrom', // ID
     title, // Title
