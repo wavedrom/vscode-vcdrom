@@ -1,11 +1,13 @@
 {
   "name": "vcdrom",
+  "displayName": "VCDrom",
   "version": "0.2.0",
   "description": "VCD viewer for VS Code",
   "main": "main.js",
+  "browser": "main.js",
   "publisher": "drom",
   "engines": {
-    "vscode": "^1.34.0"
+    "vscode": "^1.58.0"
   },
   "categories": [
     "Visualization"
