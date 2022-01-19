@@ -9,11 +9,10 @@ const getHtml = obj => {
 <html>
   <head>
     <meta charset="UTF-8">
-    <link rel="shortcut icon" href="${obj.local}/vcdrom.ico"/>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 fill=%22grey%22 font-size=%2290%22>🌊</text></svg>">
     <title>VCDrom</title>
     <link rel="preload" as="font" href="${obj.local}/iosevka-term-light.woff2" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="${obj.local}/codemirror.css">
-    <link rel="stylesheet" href="${obj.local}/blackboard.css">
     <link rel="stylesheet" href="${obj.local}/vcdrom.css">
     <script src="${obj.local}/vcdrom.js"></script>
   </head>
