@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "VCD viewer for VS Code",
   "main": "main.js",
-  "publisher": "WaveDrom",
+  "publisher": "drom",
   "engines": {
     "vscode": "^1.34.0"
   },
@@ -36,7 +36,6 @@
   "files.associations": {
     "*.vcd": "vcd"
   },
-  "enableProposedApi": true,
   "scripts": {
     "test": "eslint main.js",
     "build": "mkdir -p app && cp node_modules/vcdrom/app/* app"
@@ -54,7 +53,7 @@
   "devDependencies": {
     "@drom/eslint-config": "^0.10.0",
     "eslint": "^7.32.0",
-    "vcdrom": "^0.4.0"
+    "vcdrom": "^0.4.2"
   },
   "eslintConfig": {
     "extends": "@drom/eslint-config/eslint4/node8",
