@@ -27,7 +27,7 @@ const getHtml = obj => {
         console.log(event);
       });
     </script>
-    <div id="waveform1"></div>
+    <div id="waveform1" style="height: 100%"></div>
   </body>
 </html>
 `;
