@@ -7,42 +7,49 @@
   "browser": "main.js",
   "publisher": "drom",
   "engines": {
-    "vscode": "^1.58.0"
+    "vscode": "^1.75.0"
   },
   "categories": [
     "Visualization"
   ],
-  "activationEvents": [
-    "onCommand:vcdrom.start",
-    "onLanguage:vcd"
-  ],
+  "activationEvents": ["onLanguage:waveql", "onLanguage:vcd"],
   "contributes": {
-    "menus": {
-      "explorer/context": [
-        {
-          "command": "vcdrom.start",
-          "when": "resourceLangId == vcd",
-          "group": "navigation"
-        }
-      ]
-    },
-    "languages": [
+    "customEditors": [
       {
-        "id": "vcd",
-        "extensions": [
-          ".vcd"
+        "viewType": "vcdrom.editor",
+        "displayName": "VCDrom editor",
+        "supportsMultipleEditorsPerDocument": true,
+        "selector": [
+          {
+            "filenamePattern": "*.vcd"
+          }
         ]
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {"command": "vcdrom.start", "when": "(resourceLangId == vcd)", "group": "navigation"},
+        {"command": "vcdrom.addWaveQL", "when": "(resourceLangId == waveql)", "group": "navigation"},
+        {"command": "vcdrom.addVCD", "when": "(resourceLangId == vcd)", "group": "navigation"},
+        {"command": "vcdrom.addListing", "when": "(resourceLangId == lst)", "group": "navigation"}
+      ]
+    },
+    "languages": [
+      {"id": "vcd", "extensions": [".vcd"]},
+      {"id": "waveql", "extensions": [".waveql"]},
+      {"id": "lst", "extensions": [".lst"]}
+    ],
     "commands": [
-      {
-        "command": "vcdrom.start",
-        "title": "Open VCDrom Preview"
-      }
+      {"command": "vcdrom.start", "title": "Open VCD in VCDrom"},
+      {"command": "vcdrom.addWaveQL", "title": "select WaveQL for VCDrom"},
+      {"command": "vcdrom.addVCD", "title": "select VCD for VCDrom"},
+      {"command": "vcdrom.addListing", "title": "select Listing for VCDrom"}
     ]
   },
+  "enabledApiProposals": ["extensionRuntime", "tunnels"],
   "files.associations": {
-    "*.vcd": "vcd"
+    "*.vcd": "vcd",
+    "*.waveql": "waveql"
   },
   "scripts": {
     "test": "eslint main.js",
@@ -59,14 +66,12 @@
   },
   "homepage": "https://github.com/wavedrom/vscode-vcdrom#readme",
   "devDependencies": {
-    "@drom/eslint-config": "^0.10.0",
-    "eslint": "^7.32.0",
-    "vcdrom": "^0.4.2"
+    "@drom/eslint-config": "^0.12.0",
+    "@vscode/test-web": "^0.0.44",
+    "eslint": "^8.45.0",
+    "vcdrom": "^1.5.0"
   },
   "eslintConfig": {
-    "extends": "@drom/eslint-config/eslint4/node8",
-    "parserOptions": {
-      "ecmaVersion": 2020
-    }
+    "extends": "@drom/eslint-config/eslint8/node12"
   }
 }
