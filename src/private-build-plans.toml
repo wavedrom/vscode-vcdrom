@@ -1,0 +1,22 @@
+[buildPlans.IosevkaDrom]
+family = "Iosevka Drom"
+spacing = "normal"
+serifs = "sans"
+noCvSs = true
+exportGlyphNames = false
+
+  [buildPlans.IosevkaDrom.variants]
+  inherits = "ss15"
+
+  [buildPlans.IosevkaDrom.ligations]
+  inherits = "verilog"
+
+[buildPlans.IosevkaDrom.weights.Regular]
+shape = 400
+menu = 400
+css = 400
+
+[buildPlans.IosevkaDrom.widths.Normal]
+shape = 500
+menu = 5
+css = "normal"
