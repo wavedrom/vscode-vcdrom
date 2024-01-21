@@ -1,18 +1,18 @@
 {
-  "name": "vcdrom",
+  "name": "vscode-vcdrom",
   "displayName": "VCDrom",
   "version": "0.2.6",
   "description": "VCD viewer for VS Code",
-  "main": "main.js",
-  "browser": "main.js",
+  "main": "vcdrom-main.js",
+  "browser": "vcdrom-main.js",
   "publisher": "drom",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.80.0"
   },
   "categories": [
     "Visualization"
   ],
-  "activationEvents": ["onLanguage:waveql", "onLanguage:vcd"],
+  "activationEvents": [],
   "contributes": {
     "customEditors": [
       {
@@ -21,39 +21,60 @@
         "supportsMultipleEditorsPerDocument": true,
         "selector": [
           {
-            "filenamePattern": "*.vcd"
+            "filenamePattern": "*.waveql"
           }
-        ]
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vcdrom.addVCD",
+        "title": "VCD -> VCDrom"
+      },
+      {
+        "command": "vcdrom.addLST",
+        "title": "LST -> VCDrom"
       }
     ],
     "menus": {
       "explorer/context": [
-        {"command": "vcdrom.start", "when": "(resourceLangId == vcd)", "group": "navigation"},
-        {"command": "vcdrom.addWaveQL", "when": "(resourceLangId == waveql)", "group": "navigation"},
-        {"command": "vcdrom.addVCD", "when": "(resourceLangId == vcd)", "group": "navigation"},
-        {"command": "vcdrom.addListing", "when": "(resourceLangId == lst)", "group": "navigation"}
+        {
+          "command": "vcdrom.addVCD",
+          "when": "resourceExtname == .vcd",
+          "group": "3_compare"
+        },
+        {
+          "command": "vcdrom.addLST",
+          "when": "resourceExtname == .lst",
+          "group": "3_compare"
+        }
       ]
     },
     "languages": [
-      {"id": "vcd", "extensions": [".vcd"]},
-      {"id": "waveql", "extensions": [".waveql"]},
-      {"id": "lst", "extensions": [".lst"]}
-    ],
-    "commands": [
-      {"command": "vcdrom.start", "title": "Open VCD in VCDrom"},
-      {"command": "vcdrom.addWaveQL", "title": "select WaveQL for VCDrom"},
-      {"command": "vcdrom.addVCD", "title": "select VCD for VCDrom"},
-      {"command": "vcdrom.addListing", "title": "select Listing for VCDrom"}
+      {
+        "id": "waveql",
+        "extensions": [
+          ".waveql"
+        ]
+      }
     ]
   },
-  "enabledApiProposals": ["extensionRuntime", "tunnels"],
+  "enabledApiProposals": [
+    "extensionRuntime",
+    "tunnels"
+  ],
   "files.associations": {
-    "*.vcd": "vcd",
     "*.waveql": "waveql"
   },
   "scripts": {
-    "test": "eslint main.js",
-    "build": "mkdir -p app && cp node_modules/vcdrom/app/* app"
+    "test": "eslint lib/*.js",
+    "browserifyView": "browserify -x vscode lib/vcdrom-view.js > vcdrom-view.js",
+    "browserifyMain": "browserify -x vscode --standalone vcdrom lib/vcdrom-main.js > vcdrom-main.js",
+    "build": "npm run browserifyView browserifyMain",
+    "watchifyView": "watchify -x vscode lib/vcdrom-view.js -o vcdrom-view.js -v",
+    "watchifyMain": "watchify -x vscode --standalone vcdrom lib/vcdrom-main.js -o vcdrom-main.js -v",
+    "watch": "npm run watchifyView & npm run watchifyMain"
   },
   "repository": {
     "type": "git",
@@ -67,9 +88,16 @@
   "homepage": "https://github.com/wavedrom/vscode-vcdrom#readme",
   "devDependencies": {
     "@drom/eslint-config": "^0.12.0",
-    "@vscode/test-web": "^0.0.44",
-    "eslint": "^8.45.0",
-    "vcdrom": "^1.5.0"
+    "@vscode/test-web": "^0.0.50",
+    "@wavedrom/doppler": "^1.8.1",
+    "browserify": "^17.0.0",
+    "eslint": "^8.56.0",
+    "onml": "^2.1.0",
+    "style-mod": "^4.1.0",
+    "vcd-stream": "^1.4.0",
+    "vcdrom": "^1.5.0",
+    "watchify": "^4.0.0",
+    "waveql": "^1.6.0"
   },
   "eslintConfig": {
     "extends": "@drom/eslint-config/eslint8/node12"
