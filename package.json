@@ -71,7 +71,7 @@
     "test": "eslint lib/*.js",
     "browserifyView": "browserify -x vscode lib/vcdrom-view.js > vcdrom-view.js",
     "browserifyMain": "browserify -x vscode --standalone vcdrom lib/vcdrom-main.js > vcdrom-main.js",
-    "build": "npm run browserifyView browserifyMain",
+    "build": "npm run browserifyView && npm run browserifyMain",
     "watchifyView": "watchify -x vscode lib/vcdrom-view.js -o vcdrom-view.js -v",
     "watchifyMain": "watchify -x vscode --standalone vcdrom lib/vcdrom-main.js -o vcdrom-main.js -v",
     "watch": "npm run watchifyView & npm run watchifyMain"
@@ -89,15 +89,14 @@
   "devDependencies": {
     "@drom/eslint-config": "^0.12.0",
     "@vscode/test-web": "^0.0.50",
-    "@wavedrom/doppler": "^1.8.1",
+    "@wavedrom/doppler": "^1.9.0",
     "browserify": "^17.0.0",
     "eslint": "^8.56.0",
     "onml": "^2.1.0",
     "style-mod": "^4.1.0",
-    "vcd-stream": "^1.4.0",
-    "vcdrom": "^1.5.0",
+    "vcd-stream": "^1.5.0",
     "watchify": "^4.0.0",
-    "waveql": "^1.6.0"
+    "waveql": "^1.7.0"
   },
   "eslintConfig": {
     "extends": "@drom/eslint-config/eslint8/node12"
