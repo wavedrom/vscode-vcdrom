@@ -56852,7 +56852,7 @@ function config (name) {
 module.exports={
   "name": "vcdrom",
   "displayName": "VCDrom",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "VCD viewer for VS Code",
   "main": "vcdrom-main.js",
   "browser": "vcdrom-main.js",
@@ -56863,7 +56863,7 @@ module.exports={
   "categories": [
     "Visualization"
   ],
-  "icon": "logo.png",
+  "icon": "assets/logo.png",
   "activationEvents": [],
   "contributes": {
     "customEditors": [
