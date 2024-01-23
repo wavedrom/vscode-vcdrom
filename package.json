@@ -1,5 +1,5 @@
 {
-  "name": "vscode-vcdrom",
+  "name": "vcdrom",
   "displayName": "VCDrom",
   "version": "0.3.0",
   "description": "VCD viewer for VS Code",
@@ -12,6 +12,7 @@
   "categories": [
     "Visualization"
   ],
+  "icon": "logo.png",
   "activationEvents": [],
   "contributes": {
     "customEditors": [
@@ -60,10 +61,6 @@
       }
     ]
   },
-  "enabledApiProposals": [
-    "extensionRuntime",
-    "tunnels"
-  ],
   "files.associations": {
     "*.waveql": "waveql"
   },
@@ -100,5 +97,17 @@
   },
   "eslintConfig": {
     "extends": "@drom/eslint-config/eslint8/node12"
+  },
+  "__metadata": {
+    "id": "30746868-0e7e-4363-872c-6e3ecbc49bbe",
+    "publisherId": "a3b2880c-846b-4e8f-913b-1e14ddad6403",
+    "publisherDisplayName": "Aliaksei Chapyzhenka",
+    "targetPlatform": "undefined",
+    "isApplicationScoped": false,
+    "updated": true,
+    "isPreReleaseVersion": false,
+    "installedTimestamp": 1705909207612,
+    "pinned": false,
+    "preRelease": false
   }
 }
