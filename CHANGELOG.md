@@ -1,3 +1,7 @@
+## v0.3.2 - 2024-01-22
+
+Added animated gif
+
 ## v0.3.1 - 2024-01-22
 
 Added logo and some description
