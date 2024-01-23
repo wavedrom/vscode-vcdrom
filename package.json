@@ -12,7 +12,7 @@
   "categories": [
     "Visualization"
   ],
-  "icon": "logo.png",
+  "icon": "assets/logo.png",
   "activationEvents": [],
   "contributes": {
     "customEditors": [
