@@ -86,7 +86,7 @@
   "devDependencies": {
     "@drom/eslint-config": "^0.12.0",
     "@vscode/test-web": "^0.0.50",
-    "@wavedrom/doppler": "^1.9.0",
+    "@wavedrom/doppler": "^1.10.0",
     "browserify": "^17.0.0",
     "eslint": "^8.56.0",
     "onml": "^2.1.0",
