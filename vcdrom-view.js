@@ -1,4693 +1,192 @@
 (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+(function (global){(function (){
 'use strict';
 
-const getX = require('./get-x.js');
-const surferer = require('./surferer.js');
-
-const skipT = (wave, iStart, tLimit) => {
-  let iRes = iStart;
-  let [tRes, vRes] = wave[iStart];
-  for (let i = iStart; i < wave.length; i++) {
-    const [t, v] = wave[i];
-    if (t >= tLimit) {
-      break;
-    }
-    iRes = i;
-    tRes = t;
-    vRes = v;
-  }
-  return [iRes, vRes, tRes];
-};
-
-const bracer = (lane, desc, pstate) => {
-  const body = lane.body;
-  const { yStep } = pstate;
-  let { clock, valid, ready, up } = body;
-  up = up || 1;
-
-  const res = [];
-  let count = 0;
-
-  if (clock && clock.ref) {
-    const clockWave = desc.chango[clock.ref].wave;
-    const clockEr = surferer(clockWave, pstate);
-    let tPrevClock = 0;
-
-    if (valid && valid.ref) {
-      const validWave = desc.chango[valid.ref].wave;
-      let iValid = 0;
-      let vValid;
-
-      if (ready && ready.ref) {
-        const readyWave = desc.chango[ready.ref].wave;
-        let iReady = 0;
-        let vReady;
-
-        for (const iClock of clockEr) {
-          const [tClock, vClock] = clockWave[iClock];
-          if (vClock) {
-            [iValid, vValid] = skipT(validWave, iValid, tClock);
-            [iReady, vReady] = skipT(readyWave, iReady, tClock);
-            const xClock = getX(pstate, tClock);
-            const xPrevClock = getX(pstate, tPrevClock);
-            const width = xClock - xPrevClock;
-            const height = up * yStep;
-            if (xClock > 0 && xPrevClock > 0 && width > 0) {
-              if (vValid) {
-                if (width >= 1) {
-                  if (vReady) {
-                    res.push(['rect', {fill: 'url(\'#valid&ready\')', width: Math.round(width), height, x: Math.round(xPrevClock), y: -height}]);
-                  } else {
-                    res.push(['rect', {fill: 'url(\'#valid&~ready\')', width: Math.round(width), height, x: Math.round(xPrevClock), y: -height}]);
-                  }
-                  count++;
-                } else {
-                  count += 10;
-                }
-              }
-            }
-            tPrevClock = tClock;
-            if (count > 500) {
-              return res;
-            }
-          }
-        }
-      } else {
-        for (const iClock of clockEr) {
-          const [tClock, vClock] = clockWave[iClock];
-          if (vClock) {
-            [iValid, vValid] = skipT(validWave, iValid, tClock);
-            const xClock = getX(pstate, tClock);
-            const xPrevClock = getX(pstate, tPrevClock);
-            const width = xClock - xPrevClock;
-            const height = up * yStep;
-            if (xClock > 0 && xPrevClock > 0 && width > 0) {
-              if (vValid) {
-                if (width >= 1) {
-                  res.push(['rect', {fill: 'url(\'#valid\')', width: Math.round(width), height, x: Math.round(xPrevClock), y: -height}]);
-                  count++;
-                } else {
-                  count += 10;
-                }
-              }
-            }
-            tPrevClock = tClock;
-            if (count > 500) {
-              return res;
-            }
-          }
-        }
-      }
-    }
-  }
-  return res;
-};
-
-module.exports = bracer;
-
-/* eslint complexity: [1, 55] */
-},{"./get-x.js":11,"./surferer.js":23}],2:[function(require,module,exports){
-'use strict';
-
-const genRenderWavesGL = require('./gen-render-waves-gl.js');
-const renderCursor = require('./render-cursor.js');
-const genResizeHandler = require('./gen-resize-handler.js');
-const mTree = require('./mount-tree.js');
-const helpPanel = require('./help-panel.js');
-
-const setTime = (pstate, str) => {
-  // const { sidebarOffset, time, timescale, tgcd, xOffset } = pstate;
-  // pstate.xOffset = .5; // (2 * (pstate.width - pstate.sidebarWidth)) / pstate.time;
-  const m = str.match(/(\d+)(\w+)/); if (m) {
-    // const time1 = parseInt(m[1]);
-    // const timescale1 = ({s: 0, ms: -3, us: -6, ns: -9, ps: -12, fs: -15})[m[2]] || 0;
-    // pstate.xOffset = -1;
-  }
-};
-
-const mouseMoveHandler = (cursor, content, pstate /* , render */) => {
-  const xmargin = 160;
-  const fontHeight = 20;
-  const fontWidth = fontHeight / 2;
-  const handler = event => {
-    const x = pstate.xCursor = event.clientX;
-    cursor.style.left = (x - xmargin) + 'px';
-    cursor.innerHTML = renderCursor({xmargin, fontWidth, fontHeight}, pstate);
-  };
-  handler({clientX: pstate.width / 2});
-  content.addEventListener('mousemove', handler);
-};
-
-
-const getFullView = desc => {
-  if (desc.waveql) {
-    return;
-  }
-
-  const arr = [];
-
-  const rec = ero => {
-    if (ero.kind === 'scope') {
-      arr.push(ero.name);
-      ero.body.map(rec);
-      arr.push('..');
-      return;
-    }
-    if (ero.kind === 'var') {
-      arr.push(ero.name);
-      return;
-    }
-    console.error(ero);
-    throw new Error();
-    // Object.keys(obj).map(name => {
-    //   const ref = obj[name];
-    //   if (typeof ref === 'object') {
-    //     arr.push(name);
-    //     rec(ref);
-    //     arr.push('..');
-    //     return;
-    //   }
-    //   if (typeof ref !== 'string') {
-    //     throw new Error();
-    //   }
-    //   arr.push(name);
-    // });
-  };
-
-  rec(desc.wires);
-
-  desc.waveql = arr.join('\n');
-};
-
-
-const domContainer = (obj) => {
-
-  const sidebarWidth = 256;
-
-  const fontHeight = 16;
-
-  const elo = mTree.createElemento(obj.elemento);
-  const container = mTree.createContainer(elo, obj.layers);
-  elo.container.tabIndex = '0';
-  if (obj.pluginRightPanel) {
-    obj.pluginRightPanel(elo);
-  }
-
-  const pstate = {
-    fontHeight,
-    width: 1024, // [px] window width
-    height: 1024, // [px] window height
-    xScaleMax: 1000,
-    topBarHeight: fontHeight * 1.5, // [px]
-    botBarHeight: fontHeight * 1.5, // [px]
-    // xScaleMin: 1,
-    xOffset: sidebarWidth,
-    yOffset: 0, // [px]
-    yStep: fontHeight * 1.5, // = 24 // [px] wave lane height
-    yDuty: 0.7,
-    sidebarWidth,
-    rightPanelWidth: helpPanel.width,
-    rightPanelVisible: false,
-    container
-  };
-
-  return {
-    elo,
-    pstate,
-    start: (deso /* , opt */) => {
-
-      // content.appendChild(container);
-      // content.appendChild(elo.rightPanel);
-      getFullView(deso);
-
-      deso.t0 = deso.t0 || 0;
-      // desc.xScale |= 8;
-
-      Object.assign(pstate, {
-        tgcd: deso.tgcd,
-        timescale: deso.timescale,
-        xScale: deso.xScale || 8,
-        numLanes: deso.view.length,
-        t0: deso.t0,
-        time: deso.time
-      });
-
-      try {
-        const str = localStorage.getItem('vcdrom');
-        const obj = JSON.parse(str);
-        Object.assign(pstate, obj);
-      } catch(err) {
-        console.error(err);
-      }
-
-      // const {timetopSVG, timebotSVG} = timeline(deso);
-
-      if (deso.timeOpt) {
-        setTime(pstate, deso.timeOpt.value);
-      }
-
-      let render2 = genRenderWavesGL(elo);
-      let render1 = render2(deso);
-      let render = render1(pstate, obj.renderPlugins);
-      deso.render = render;
-
-      const resizeHandler = genResizeHandler(pstate);
-
-      const resizeObserver = new ResizeObserver(entries => {
-        for (let entry of entries) {
-          let {width, height} = entry.contentRect;
-          // height = height || 888;
-          // console.log('resizeObserver', width, height);
-          resizeHandler(width, height);
-        }
-        deso.render();
-      });
-
-      resizeObserver.observe(elo.container);
-
-      // pinchAndZoom(els.container, content, pstate, render);
-      resizeHandler(elo.container.clientWidth, elo.container.clientHeight);
-      mouseMoveHandler(elo.cursor, elo.container, pstate, deso.render);
-      deso.render();
-    }
-  };
-};
-
-module.exports = domContainer;
-
-/* eslint-env browser */
-
-},{"./gen-render-waves-gl.js":6,"./gen-resize-handler.js":7,"./help-panel.js":13,"./mount-tree.js":17,"./render-cursor.js":20}],3:[function(require,module,exports){
-'use strict';
-
-const formatTime = (t, expo) => {
-  const prefixes = ['T', 'G', 'M', 'k', '', 'm', 'µ', 'n', 'p', 'f', 'a', 'z', 'y'];
-  const ts1 = 14 - expo;
-  const prefix = prefixes[(ts1 / 3) |0];
-  const mult = ([100, 10, 1])[ts1 % 3];
-  return (t * mult).toLocaleString() + ' ' + prefix + 's';
-};
-
-module.exports = formatTime;
-
-},{}],4:[function(require,module,exports){
-'use strict';
-
-const {keyName} = require('w3c-keyname');
-
-const executeKeyHandler = (key, keyBindo, pstate, cm) => {
-  return (keyBindo[key] || keyBindo.nop).fn(pstate, cm);
-};
-
-const genKeyHandler = (div, pstate, deso, cm, keyBindo, plugins) => {
-  return event => {
-
-    const modifier = (
-      (event.ctrlKey ? 'Ctrl+' : '') +
-      (event.shiftKey ? 'Shift+' : '') +
-      (event.altKey ? 'Alt+' : '')
-    );
-    // const key = modifier + event.key;
-    const key = modifier + keyName(event);
-
-    if (executeKeyHandler(key, keyBindo, pstate, cm)) {
-      event.stopPropagation();
-      if (plugins != undefined) {
-        plugins.map(fn => fn(key, event));
-      }
-      deso.render();
-    }
-  };
-};
-
-exports.executeKeyHandler = executeKeyHandler;
-exports.genKeyHandler = genKeyHandler;
-
-},{"w3c-keyname":38}],5:[function(require,module,exports){
-'use strict';
-
-const genOnWheel = (element, pstate, deso, cm, keyBindo, plugins) =>
-  event => {
-    const {deltaY} = event;
-    if (event.ctrlKey) {
-      const key = (deltaY < 0)
-        ? 'Ctrl+icon:scrollUp'
-        : ((deltaY > 0) ? 'Ctrl+icon:scrollDown' : 'nop');
-      if (keyBindo[key].fn(pstate)) {
-        if (plugins != undefined) {
-          plugins.map(fn => fn(key, event));
-        }
-        deso.render();
-      }
-      event.preventDefault();
-    } else
-    if (event.shiftKey) {
-      const key = (deltaY < 0) ? 'Shift+icon:scrollUp' : ((deltaY > 0) ? 'Shift+icon:scrollDown' : 'nop');
-      if (keyBindo[key].fn(pstate)) {
-        if (plugins != undefined) {
-          plugins.map(fn => fn(key, event));
-        }
-        deso.render();
-      }
-      event.preventDefault();
-    }
-  };
-
-module.exports = genOnWheel;
-
-},{}],6:[function(require,module,exports){
-'use strict';
-
-const cColors = new Float32Array([
-  0, 0, 0, 0, // 0:
-  0, 0, 1, 1, // 1: (Z) high impedance
-
-  0, 1, 0, 1, // 2: strong 0
-  0, 1, 1, 1, // 3: strong 1
-  1, 0, 0, 1, // 4: (x X) strong unknown
-
-  .5, 1, 1, 1, // 5: vec
-  1, 1, 0, 1, // 6: yellow
-  1, 0, 1, 1, // 7: strange purple
-
-  0, 1, 0, .5, // 8: (l L) weak 0
-  0, 1, 1, .5, // 9: (h H) weak 1
-  1, 0, 0, .5, // 10: (w W) weak unknown
-
-  0, 0, 0, 0, // 11:
-  0, 0, 0, 0, // 12:
-  0, 0, 0, 0, // 13:
-  0, 0, 0, 0, // 14:
-  0, 0, 0, 0  // 15:
-]);
-
-const cTilts = new Float32Array([ // 14
-  0,  0,  // 0
-  1,  -1, // 1
-  1,  0,  // 2
-  1,  1,  // 3
-  -1, -1, // 4
-  -1, 0,  // 5
-  -1, 1   // 6
-]);
-
-const shaderer = (kind, src) => gl => {
-  const vShader = gl.createShader(gl[kind]);
-  gl.shaderSource(vShader, src);
-  gl.compileShader(vShader);
-  return vShader;
-};
-
-const vertexShaderScalar = shaderer('VERTEX_SHADER', `#version 300 es
-in uvec3 pos;
-out vec4 v_color;
-uniform vec2 scale;
-uniform vec2 offset;
-uniform vec4 colors[16];
-uniform vec2 tilts[7];
-uniform float tilt;
-void main() {
-  v_color = colors[pos.z];
-  vec2 node = tilts[pos.y];
-  gl_Position = vec4(
-    float(pos.x) * scale.x + offset.x + node[1] * tilt,
-    float(node[0]) * scale.y + offset.y,
-    1, 1
-  );
-}
-`);
-
-const fragmentShader = shaderer('FRAGMENT_SHADER', `#version 300 es
-precision mediump float;
-in vec4 v_color;
-out vec4 myOutputColor;
-void main() {
-  myOutputColor = v_color;
-}
-`);
-
-const initProgram = gl => {
-  const program = gl.createProgram();
-  gl.attachShader(program, vertexShaderScalar(gl));
-  gl.attachShader(program, fragmentShader(gl));
-  gl.linkProgram(program);
-  gl.useProgram(program);
-
-  return 'colors tilts scale offset tilt'
-    .split(/\s+/)
-    .reduce((res, name) => Object.assign(res, {
-      [name]: gl.getUniformLocation(program, name)
-    }), {
-      pos: gl.getAttribLocation(program, 'pos'),
-      gl
-    });
-};
-
-const bar = [
-  (f, t, a, b, c0, c1) => [].concat( // 0
-    (f === 1) ? [a, 2, c1] : [],
-                [a, 5, c0],
-                [b, 5, c0],
-    (t  >  1) ? [b, 0, c0] : []
-  ),
-  (f, t, a, b, c0, c1) => [].concat( // 1
-    (f === 0) ? [a, 5, c0] :
-    (f  >  1) ? [a, 0, c0] : [],
-                [a, 2, c1],
-                [b, 2, c1],
-    (t  >  1) ? [b, 0, c0] : []
-  ),
-  (f, t, a, b, c0, c1) => [a, 0, c0, b, 0, c1] // 2 = Z
-];
-
-const brick = [
-  (f, t, a, b, c0, c1) => [].concat( // 0
-    (f === 0) ? [a, 5, c0] :
-    (f === 1) ? [a, 1, c1] : [],
-                [a, 6, c0],
-    (t === 0) ? [b, 5, c0] :
-                [b, 4, c0],
-    (t === 3) ? [b, 0, c0] : []
-  ),
-  (f, t, a, b, c0, c1) => [].concat( // 1
-    (f === 0) ? [a, 4, c0, a, 3, c1] :
-    (f === 1) ? [a, 2, c1] :
-    (f === 2) ? [a, 3, c1] :
-                [a, 0, c0, a, 3, c1],
-    (t === 1) ? [b, 3, c1] :
-                [b, 1, c1],
-    (t === 3) ? [b, 0, c0] : []
-  ),
-  (f, t, a, b, c0, c1) => [].concat( // 2
-    (f === 0) ? [a, 4, 0] :
-    (f === 1) ? [a, 1, 0] :
-                [a, 0, 0],
-    (t === 0) ? [b, 6, 0, b, 6, c0] :
-    (t === 1) ? [b, 3, 0, b, 3, c1, b, 4, c0] :
-                [b, 0, 0, b, 0, c0, b, 4, c0],
-    (f === 0) ? [a, 4, c0, a, 3, c1] :
-    (f === 1) ? [a, 6, c0, a, 1, c1] :
-                [a, 6, c0, a, 0, c0, a, 3, c1],
-    (t === 0) ? [b, 1, c1, b, 6, c0] :
-    (t === 1) ? [b, 3, c1] :
-                [b, 1, c1, b, 0, c0]
-  )
-];
-
-const wave2vertex = desc => {
-  Object.keys(desc.chango).map(ref => {
-
-    const chang = desc.chango[ref];
-    const { kind, wave } = chang;
-
-    // desc.view.map(lane => {
-    // if (!lane || lane.ref === undefined) { return; }
-    // const chang = desc.chango[lane.ref];
-    // if (chang === undefined) { return; }
-    // const {kind, wave} = chang;
-    // lane.kind = kind;
-    // lane.wave = wave;
-
-    if (kind === 'bit') {
-      const vertices = [];
-      const ilen = wave.length;
-      for (let i = 0; i < ilen; i++) {
-        const f = wave[(i === 0) ? 0 : (i - 1)];
-        const [tim, val] = wave[i];
-        const t = wave[(i === (ilen - 1)) ? i : (i + 1)];
-        const tt = (i === (ilen - 1)) ? desc.time : wave[i + 1][0];
-
-        switch (val) {
-        case 0: case 1: // 0 1
-          vertices.push(...bar[val](f[1], t[1], tim, tt, 2, 3));
-          break;
-        case 2: case 3: // x X
-          vertices.push(...bar[2](f[1], t[1], tim, tt, 4, 4));
-          break;
-        case 4: case 5: // z Z
-          vertices.push(...bar[2](f[1], t[1], tim, tt, 1, 1));
-          break;
-        case 6: case 7: // u U uninitialized
-          vertices.push(...bar[2](f[1], t[1], tim, tt, 6, 6));
-          break;
-        case 8: case 9: // w W weak unknown
-          vertices.push(...bar[2](f[1], t[1], tim, tt, 10, 10));
-          break;
-        case 10: case 11: // l L
-          vertices.push(...bar[0](f[1], t[1], tim, tt, 8, 9));
-          break;
-        case 12: case 13: // h H
-          vertices.push(...bar[1](f[1], t[1], tim, tt, 8, 9));
-          break;
-        default:
-          vertices.push(...bar[2](f[1], t[1], tim, tt, 7, 7));
-            // throw new Error('val is: ' + val);
-        }
-      }
-
-      chang.vertices = new Uint32Array(vertices); // Uint16Array // 16bit
-
-      // lane.vertices = new Uint16Array(vertices);
-
-    }
-    if (kind === 'vec') {
-      const vertices = [];
-      const ilen = wave.length;
-      for (let i = 0; i < ilen; i++) {
-        // const f = wave[(i === 0) ? 0 : (i - 1)];
-        const [tim, val, msk] = wave[i];
-        // const t = wave[(i === (ilen - 1)) ? i : (i + 1)];
-        const tt = (i === (ilen - 1)) ? desc.time : wave[i + 1][0];
-
-        if (val) {
-          if (msk) {
-            vertices.push(...brick[2](2, 2, tim, tt, 4, 4)); // x,z?
-          } else {
-            // vertices.push(...brick[2](2, 2, tim, tt, 5, 5)); // 2
-            vertices.push(
-              tim, 0, 0,
-              tt, 0, 0, tt, 0, 5, tt, 4, 5,
-              tim, 6, 5, tim, 0, 5, tim, 3, 5,
-              tt, 1, 5, tt, 0, 5
-            );
-          }
-        } else {
-          if (msk) {
-            vertices.push(...brick[2](2, 2, tim, tt, 4, 4)); // x
-          } else {
-            // vertices.push(...brick[0](2, 2, tim, tt, 2, 3)); // 0
-            vertices.push(tim, 6, 2, tt, 4, 2);
-          }
-        }
-      }
-
-      chang.vertices = new Uint32Array(vertices); // Uint16Array // 16bit
-
-      // lane.vertices = new Uint16Array(vertices);
-
-    }
-  });
-};
-
-const initData = (loco, desc) => {
-
-  Object.keys(desc.chango).map(ref => {
-
-    const chang = desc.chango[ref];
-    const { vertices } = chang;
-
-    // desc.view.map(lane => {
-    // if (!lane) {
-    //   return;
-    // }
-    // const vertices = desc.chango[lane.ref].vertices;
-    //
-    // if (!vertices) {
-    //   return;
-    // }
-
-    // if (!lane || lane.vertices === undefined) {
-    //   return;
-    // }
-    // const vertices = lane.vertices;
-
-    const gl = loco.gl;
-    const vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-    chang.vao = gl.createVertexArray();
-    gl.bindVertexArray(chang.vao);
-    gl.vertexAttribIPointer(
-      loco.pos,
-      3, // number of conponents (x, y, z)
-      gl.UNSIGNED_INT, // UNSIGNED_SHORT, // 16bit
-      0 /* stride */, 0 /* offset */
-    );
-    gl.enableVertexAttribArray(loco.pos);
-
-    gl.uniform4fv(loco.colors, cColors);
-    gl.uniform2fv(loco.tilts, cTilts);
-  });
-};
-
-const genRenderWavesGL = (els) => {
-
-  const cnvs = document.createElement('canvas');
-  els.view0.replaceChildren(cnvs);
-  // cnvs.width = 1024;
-  // cnvs.height = 1024;
-  // cnvs.style = 'background-color: #111;';
-  const glProps = {
-    premultipliedAlpha: false,
-    alpha: true,
-    antialias: false,
-    depth: false
-  };
-  const gl = cnvs.getContext('webgl2', glProps);
-  const loco = initProgram(gl);
-
-  return desc => {
-    wave2vertex(desc);
-    initData(loco, desc);
-
-    return (pstate, plugins) => {
-
-      return () => {
-        const {width, height, xScale, xOffset, yOffset, yStep, yDuty} = pstate;
-        const cHeight = height - 40;  // FIXME 40
-        cnvs.width = width;
-        cnvs.height = cHeight;
-        // const xs = pstate.scale;
-        // const xo = -1;
-        gl.uniform1f(loco.tilt, 3 / width);
-        gl.uniform2f(loco.scale, 2 * xScale / width, yStep * yDuty / cHeight); // FIXME 40
-        gl.viewport(0, 0, width, cHeight);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        desc.view.map((lane, idx) => {
-          if (!lane) { // || lane.vertices === undefined) {
-            return;
-          }
-          const ref = lane.ref;
-          if (ref === undefined) {
-            return;
-          }
-          const chang = desc.chango[ref];
-          if (chang === undefined) {
-            return;
-          }
-          // console.log(chang);
-          gl.bindVertexArray(chang.vao);
-          gl.uniform2f(loco.offset,
-            (2 * xOffset / width) - 1,
-            (2 * yOffset - 2 * yStep * (idx + .7)) / cHeight + 1
-          );
-          gl.drawArrays(
-            gl.LINE_STRIP, // mode
-            0, // first
-            chang.vertices.length / 3 // count
-          );
-        });
-
-        plugins.map(fn => fn(desc, pstate, els));
-
-      };
-    };
-  };
-};
-
-module.exports = genRenderWavesGL;
-
-/* eslint-env browser */
-/* eslint complexity: [1, 30] */
-
-},{}],7:[function(require,module,exports){
-'use strict';
-
-const xOffsetUpdate = require('./x-offset-update.js');
-
-const genResizeHandler = pstate =>
-  (width, height) => {
-    let {xOffset, yOffset, xScale, yStep, time, sidebarWidth, numLanes} = pstate;
-    pstate.width = width;
-    pstate.height = height;
-
-    // Y
-    const yOffsetMax = (numLanes + 2) * 2 * yStep;
-    if (yOffsetMax < 0) {
-      yOffset = 0;
-    } else
-    if (yOffset > yOffsetMax) {
-      yOffset = yOffsetMax;
-    }
-    pstate.yOffset = yOffset;
-
-    // X
-    const xScaleMin = pstate.xScaleMin = (width - sidebarWidth) / time;
-    pstate.xScale = (xScale < xScaleMin) ? xScaleMin : xScale;
-    xOffsetUpdate(pstate, xOffset);
-  };
-
-module.exports = genResizeHandler;
-
-},{"./x-offset-update.js":28}],8:[function(require,module,exports){
-'use strict';
-
-const getElement = divName => {
-  if (typeof divName === 'string') {
-    const c = document.getElementById(divName);
-    if (c === null) {
-      throw new Error('<div> element width Id: "' + divName + '" not found');
-    }
-    return c;
-  }
-  return divName;
-};
-
-module.exports = getElement;
-
-/* eslint-env browser */
-
-},{}],9:[function(require,module,exports){
-'use strict';
-
-const lister = require('./lister.js');
-
-const getListing = async (readers) => {
-  let listing = [];
-  const r = readers.find(reader => reader.ext === 'lst');
-  if (r) {
-    const utf8Decoder = new TextDecoder('utf-8');
-    const list = lister();
-    for (let i = 0; i < 10000; i++) {
-      let { done, value } = await r.reader.read();
-      if (typeof value !== 'string') {
-        value = utf8Decoder.decode(value, {stream: true});
-      }
-      list.onChunk(value);
-      if (done) {
-        listing = list.getTrace();
-        break;
-      }
-    }
-  }
-  return listing;
-};
-
-module.exports = getListing;
-
-},{"./lister.js":16}],10:[function(require,module,exports){
-'use strict';
-
-const getT = (x, pstate) => {
-  const {xOffset, xScale, tgcd } = pstate;
-  return Math.round((x / xScale) - (xOffset / xScale)) * tgcd;
-  // t = ((x / xScale * 2) - (xOffset * width / xScale)) * tgcd;
-  // t = (x / xScale * 2) * tgcd - (xOffset * width / xScale) * tgcd;
-  // t + (xOffset * width / xScale) * tgcd = (x / xScale * 2) * tgcd;
-  // (t / tgcd) + (xOffset * width / xScale) = (x / xScale * 2);
-  // (t / tgcd) * xScale / 2 + (xOffset * width / 2) = x;
-};
-
-module.exports = getT;
-
-},{}],11:[function(require,module,exports){
-'use strict';
-
-const getX = (pstate, time) =>
-  time * pstate.xScale + pstate.xOffset;
-
-module.exports = getX;
-
-},{}],12:[function(require,module,exports){
-'use strict';
-
-// Fletcher Style checksum
-
-const hash = str => {
-  let sum1 = 599;
-  let sum2 = 173;
-  for (let i = 0; i < str.length; i++) {
-    sum1 = (sum1 + str.charCodeAt(i)) & 255;
-    sum2 = (sum2 + sum1) & 255;
-  }
-  return (sum2 ^ sum1 ^ (sum2 >> 5) ^ (sum1 >> 5)) % 36;
-};
-
-module.exports = hash;
-
-},{}],13:[function(require,module,exports){
-'use strict';
-
-const genSVG = require('onml/gen-svg.js');
-
-const width = exports.width = 320;
-
-exports.toggle = (pstate) => {
-  console.log('toggle');
-  const visible = pstate.rightPanelVisible = !pstate.rightPanelVisible;
-  pstate.container.style.setProperty(
-    '--right-panel-width',
-    (visible ? width : 0) + 'px'
-  );
-};
-
-exports.mlIcon = () => {
-  const qMark = ['g', {w: 24, h: 24},
-    ['circle', {style: 'fill: #facd6a26', r: 12, cx: 12, cy: 12}],
-    ['path', {style: 'fill: #6e6f19', d: 'M 12 4 a 7 7 0 1 1 0 16 a 7 7 0 1 1 0 -16 z v -1 a 8 8 0 1 0 0 18 a 8 8 0 1 0 0 -18 z'}],
-    ['path', {style: 'fill: #c8a100', d: 'M 9.255 9.786 a .237 .237 0 0 0 .241 .247 h .825 c .138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0 -.552 -.42 -.94 -1.029 -.94 -.584 0 -1.009 .388 -1.009 .94 z'}]
-  ];
-
-  const svg = genSVG(24, 24);
-  svg[1].width = 48;
-  svg[1].height = 48;
-  svg.push(qMark);
-  // return ['a', {href, target: '_blank'}, svg];
-  return svg;
-};
-
-const mouseOutline = ['path', {
-  style: 'stroke:#fff;fill:none',
-  d: 'm 14,8 c 1,0 2,1 2,2 v 5 c 0,1 -1,2 -2,2 -1,0 -2,-1 -2,-2 v -5 c 0,-1 1,-2 2,-2 m 0,0 V 6 m 0,13 V 17 M 3,22 V 13 C 3,8 10,6 13,6 h 2 c 3,0 10,2 10,7 v 9'
-}];
-
-const mouseWheel = ['path', {
-  style: 'stroke:none;fill:#aa0',
-  d: 'm 14,8.5 c 1,0 2,1 2,2 v 5 c 0,1 -1,2 -2,2 -1,0 -2,-1 -2,-2 v -5 c 0,-1 1,-2 2,-2'
-}];
-
-const icons = {
-  scrollUp: genSVG(28, 24).concat([
-    mouseWheel,
-    mouseOutline,
-    ['path', {style: 'stroke:#fff;fill:none', d: 'm 10,4 4,-3 4,3'}]
-  ]),
-  scrollDown: genSVG(28, 24).concat([
-    mouseWheel,
-    mouseOutline,
-    ['path', {style: 'stroke:#fff;fill:none', d: 'm 10,20 4,3 4,-3'}]
-  ])
-};
-
-exports.mlPanel = (keyBindo) => {
-  const ml = ['div',
-    ['div', {class: 'wd-help-panel-row'},
-      ['h3', 'Keyboard / Mouse shortcuts']
-    ]
-  ];
-  const descMap = Object.keys(keyBindo).reduce((res, key) => {
-    const val = keyBindo[key];
-    const desc = val.desc;
-    if (desc) {
-      res[desc] = (res[desc] || []).concat(key);
-    }
-    return res;
-  }, {});
-
-  Object.keys(descMap).map((desc, i) => {
-    ml.push(['div',
-      {class: 'wd-help-panel-row' + ((i & 1) ? '' : ' wd-even')},
-      ['span', {class: 'wd-key-help-desc'}, desc],
-      ['span', {class: 'wd-key-help-comb'},
-        ...descMap[desc].map((d) => ['span',
-          {class: 'wd-key-group'},
-          ...d.split('+').flatMap((item, i) => {
-            const res = (i === 0) ? [] : ['+'];
-            const kind = item.split(':');
-            if (kind[0] === 'icon') {
-              res.push(icons[kind[1]]);
-            } else {
-              res.push(['span', {class: 'wd-key-item'}, item]);
-            }
-            return res;
-          })
-        ])
-      ]
-    ]);
-  });
-  return ml;
-};
-
-exports.css = {
-  '.wd-help-icon': {
-    cursor: 'help',
-    position: 'absolute',
-    right: 'calc(var(--right-panel-width) * ' + (1 - 80 / width) + ' + 20px)',
-    transition: 'right .3s',
-    bottom: '32px'
-  },
-  '.wd-help-panel': {
-    width,
-    'font-size': 16,
-    position: 'absolute',
-    right: 'calc(var(--right-panel-width) - ' + width + 'px)',
-    transition: 'right .3s',
-    top: '0px',
-    height: '100%',
-    'overflow-y': 'auto'
-  },
-  '.wd-even': {
-    background: '#ffffff11'
-  },
-  '.wd-help-panel-row': {
-    display: 'flex',
-    padding: '10px 10px 10px 10px'
-  },
-  '.wd-key-help-desc': {
-    display: 'flex',
-    'align-items': 'center',
-    'flex-grow': 1
-  },
-  '.wd-key-help-comb': {
-    display: 'flex',
-    'flex-direction': 'column'
-  },
-  '.wd-key-item': {
-    'border-style': 'outset',
-    'border-radius': '6px',
-    'border-color': '#655 #27a #27a #655',
-    padding: '0 4',
-    margin: '0 2'
-  },
-  '.wd-key-group': {
-    display: 'flex',
-    padding: '0 0 4 0'
-  }
-};
-
-},{"onml/gen-svg.js":30}],14:[function(require,module,exports){
-'use strict';
-
-const getElement = require('./get-element.js');
-const getListing = require('./get-listing.js');
-const domContainer = require('./dom-container.js');
-const pluginRenderValues = require('./plugin-render-values.js');
-const pluginRenderTimeGrid = require('./plugin-render-time-grid.js');
-const keyBindo = require('./key-bindo.js');
-const mountTree = require('./mount-tree.js');
-const genKeyHandler = require('./gen-key-handler.js');
-const genOnWheel = require('./gen-on-wheel.js');
-const xOffsetUpdate = require('./x-offset-update.js');
-const getX = require('./get-x.js');
-const getT = require('./get-t.js');
-const themeAll = require('./theme-all.js');
-const helpPanel = require('./help-panel.js');
-
-exports.getListing = getListing;
-exports.getElement = getElement;
-exports.domContainer = domContainer;
-exports.pluginRenderValues = pluginRenderValues;
-exports.pluginRenderTimeGrid = pluginRenderTimeGrid;
-exports.keyBindo = keyBindo;
-exports.mountTree = mountTree;
-exports.genKeyHandler = genKeyHandler;
-exports.genOnWheel = genOnWheel;
-exports.xOffsetUpdate = xOffsetUpdate;
-exports.getX = getX;
-exports.getT = getT;
-exports.themeAll = themeAll;
-exports.helpPanel = helpPanel;
-
-},{"./dom-container.js":2,"./gen-key-handler.js":4,"./gen-on-wheel.js":5,"./get-element.js":8,"./get-listing.js":9,"./get-t.js":10,"./get-x.js":11,"./help-panel.js":13,"./key-bindo.js":15,"./mount-tree.js":17,"./plugin-render-time-grid.js":18,"./plugin-render-values.js":19,"./theme-all.js":24,"./x-offset-update.js":28}],15:[function(require,module,exports){
-'use strict';
-
-const xOffsetUpdate = require('./x-offset-update.js');
-const xScaleUpdate = require('./x-scale-update.js');
-const helpPanel = require('./help-panel.js');
-
-const yScroll = delta => (pstate, cm) => {
-  const info = cm.getScrollInfo();
-  cm.scrollTo(null, info.top + info.clientHeight * delta);
-  return false;
-};
-
-const pluso = {
-  desc: 'Zoom in time',
-  fn: pstate => xScaleUpdate(pstate, 3 / 2 * pstate.xScale)
-};
-
-const minuso = {
-  desc: 'Zoom out time',
-  fn: pstate => xScaleUpdate(pstate, 2 / 3 * pstate.xScale)
-};
-
-const fullo = {
-  desc: 'All of time',
-  fn: pstate => xScaleUpdate(pstate, pstate.xScaleMin)
-};
-
-const scroll = {
-  left: {
-    desc: 'Scroll into the past',
-    fn: pstate => xOffsetUpdate(pstate, pstate.xOffset + .2 * pstate.width)
-  },
-  right: {
-    desc: 'Scroll into the future',
-    fn: pstate => xOffsetUpdate(pstate, pstate.xOffset - .2 * pstate.width)
-  },
-  up:   {
-    desc: 'scroll up',
-    fn: yScroll(-.1)
-  },
-  down: {
-    desc: 'scroll down',
-    fn: yScroll(.1)
-  }
-};
-
-const editable = {
-  desc: 'Toggle edit mode',
-  fn: (pstate, cm) => {
-    console.log('editable', pstate, cm);
-  }
-};
-
-module.exports = {
-  // Alt +  <,  >.    left / right
-  'Alt+,': scroll.left,  'Shift+icon:scrollUp':  scroll.left,
-
-  'Alt+.': scroll.right, 'Shift+icon:scrollDown': scroll.right,
-
-  // Alt +  [  ]      home / end
-  'Alt+[': {desc: 'Jump to beginning of time', fn: pstate => xOffsetUpdate(pstate, pstate.sidebarWidth)}, // Home
-
-  'Alt+]': {desc: 'Jump to end time',       fn: pstate => xOffsetUpdate(pstate, pstate.width - pstate.xScale * pstate.time)}, // End
-
-  // ALT +  -  +
-  'Alt+=': pluso,  // '+': pluso,  '=': pluso,
-  'Ctrl+icon:scrollUp':  pluso,
-
-  'Alt+-': minuso, // '-': minuso, '_': minuso,
-  'Ctrl+icon:scrollDown': minuso,
-
-  'Alt+0': fullo, // 'Shift+f': fullo, F: fullo, 'Shift+F': fullo,
-
-  'Alt+/': editable,
-
-  'Shift+?': {
-    desc: 'Toggle help panel',
-    fn: helpPanel.toggle},
-  // CAN'T DO: Alt + e, d, f, l
-
-  // ArrowUp:    scroll.up,    'Shift+ArrowUp':    scroll.up,
-  // ArrowDown:  scroll.down,  'Shift+ArrowDown':  scroll.down,
-
-  // PageUp:     {desc: 'scroll page up',    fn: yScroll(-1)},
-  // PageDown:   {desc: 'scroll page down',  fn: yScroll(1)},
-
-  nop:        {fn: () => false}
-};
-
-},{"./help-panel.js":13,"./x-offset-update.js":28,"./x-scale-update.js":29}],16:[function(require,module,exports){
-'use strict';
-
-module.exports = () => {
-  const trace = {};
-  let tail = '';
-  return {
-    onChunk: (chunk) => {
-      const rows = (tail + chunk).split('\n');
-      // console.log('chunk:', chunk.length, 'tail:', tail.length, 'rows:', rows.length);
-      tail = rows.pop();
-      rows.map(row => {
-        const m = row.match(/\s*([0-9a-f]+):\s*([0-9a-f]+)\s+(.+)/);
-        if (m) {
-          const pc = parseInt(m[1], 16);
-          const op = m[2];
-          const asm = m[3].replace(/\t/, ' ');
-          trace[pc] = {op, asm};
-        }
-      });
-    },
-    getTrace: () => trace
-  };
-};
-
-},{}],17:[function(require,module,exports){
-'use strict';
-
-const defaultElemento = {
-  container:  ['div', {class: 'wd-container', id: 'wd-container'}],
-  grid:       ['div', {class: 'wd-grid'}],    // style: 'position: absolute; left: 0px;' // z-index: -10'
-  view0:      ['div', {class: 'wd-view'}],    // style: 'position: absolute; left: 0px;' // z-index: -10'
-  values:     ['div', {class: 'wd-values'}], // style: 'position: absolute; left: 0px;' // z-index: -9'
-  cursor:     ['div', {class: 'wd-cursor'}], // style: 'position: absolute; top: 0px; left: 0px;'
-  // style: 'overflow: hidden; position: absolute; top: 0px; left: 0px;'
-  waveqlPanel: ['div', {class: 'wd-waveql'}],
-  rightPanel: ['div', {class: 'wd-help-panel'}],
-  menu:       ['div', {class: 'wd-help-icon'}] // style: 'position: absolute; right: 32px; bottom: 32px;'
-};
-
-const defaultLayers = [
-  'grid',
-  'view0',
-  'values',
-  'waveqlPanel',
-  'cursor',
-  'rightPanel',
-  'menu'
-];
-
-const createElemento = elemento => {
-  const names = Object.keys(elemento);
-  return names.reduce((res, name) => {
-    const ml = elemento[name];
-    const el = document.createElement(ml[0]);
-    const attr = (typeof ml[1] === 'object') ? ml[1] : {};
-    Object.keys(attr).map(key => {
-      if (key === 'class') {
-        el.classList.add(attr.class);
-      } else {
-        el.setAttribute(key, attr[key]);
-      }
-    });
-    res[name] = el;
-    return res;
-  }, {});
-};
-
-const createContainer = (els, layers) => {
-  layers.map(layer => els.container.appendChild(els[layer]));
-  return els.container;
-};
-
-exports.defaultElemento = defaultElemento;
-exports.defaultLayers = defaultLayers;
-exports.createElemento = createElemento;
-exports.createContainer = createContainer;
-
-/* eslint-env browser */
-},{}],18:[function(require,module,exports){
-'use strict';
-
-const genSVG = require('onml/gen-svg.js');
-const stringify = require('onml/stringify.js');
-
-const formatTime = require('./format-time.js');
-const getT = require('./get-t.js');
-
-const round10 = n =>
-  ([
-  /*0  1  2  3  4  5  6  7  8   9 */
-    0, 1, 2, 4, 4, 5, 5, 5, 10, 10,
-    /*10  11  12  13  14  15  16  17  18  19 */
-    10, 10, 10, 15, 15, 15, 15, 20, 20, 20
-  ])[Math.round(n)]
-  || Math.round(n);
-
-const getTimeGrid = pstate => {
-  const { sidebarWidth, width, height, timescale, xScale, tgcd, xOffset, topBarHeight, botBarHeight } = pstate;
-  const fontHeight = 16;
-  // const timeLineStart = (xOffset * width / 2) |0;
-
-  const timeGrid = ['g', {}];
-
-  const xStartExact = getT(sidebarWidth, pstate);
-  const xFinishExact = getT(width, pstate);
-  const density = 1;
-  const xLines = Math.round(density * width / sidebarWidth);
-
-  const xStep = ((xFinishExact - xStartExact) / xLines);
-  const xExp = Math.pow(10, Math.log10(xStep) |0);
-  const xDelta = round10(xStep / xExp) * xExp;
-
-  const xStart = Math.ceil(xStartExact / xDelta) * xDelta;
-  const xFinish = Math.floor(xFinishExact / xDelta) * xDelta;
-
-  for (let t = xStart; t <= xFinish; t += xDelta) {
-    const x = Math.round(t / tgcd * xScale + xOffset);
-    timeGrid.push(['g', {},
-      ['line', {
-        class: 'wd-grid-time',
-        x1: x,
-        x2: x,
-        y2: height
-      }],
-      ['text', {
-        class: 'wd-grid-time',
-        x: x,
-        y: (topBarHeight + fontHeight) / 2
-      }, formatTime(t, timescale)],
-      ['text', {
-        class: 'wd-grid-time',
-        x: x,
-        y: height - (botBarHeight - fontHeight) / 2
-      }, formatTime(t, timescale)]
-    ]);
-  }
-
-  return timeGrid;
-};
-
-const pluginRenderTimeGrid = (desc, pstate, els) => {
-  const {width, height} = pstate;
-  const ml = genSVG(width, height);
-  ml.push(getTimeGrid(pstate));
-  els.grid.innerHTML = stringify(ml);
-};
-
-module.exports = pluginRenderTimeGrid;
-
-},{"./format-time.js":3,"./get-t.js":10,"onml/gen-svg.js":30,"onml/stringify.js":34}],19:[function(require,module,exports){
-'use strict';
-
-const renderValues = require('./render-values.js');
-
-const pluginRenderValues = (desc, pstate, els) => {
-  const gen = renderValues(desc, pstate);
-  for (let i = 0; i < 1e6; i++) {
-    const iter = gen.next();
-    if (iter.done) {
-      els.values.innerHTML = iter.value;
-      break;
-    }
-  }
-};
-
-module.exports = pluginRenderValues;
-
-},{"./render-values.js":21}],20:[function(require,module,exports){
-'use strict';
-
-const genSVG = require('onml/gen-svg.js');
-const stringify = require('onml/stringify.js');
-const formatTime = require('./format-time.js');
-
-const renderCursor = (cfg, pstate) => {
-  const {xmargin, fontWidth, fontHeight} = cfg;
-  const {height, xScale, xOffset, tgcd, timescale, xCursor} = pstate;
-
-  const xx = Math.round((xCursor - xOffset) / xScale) * tgcd;
-  const label = formatTime(xx, timescale);
-  const lWidth = (label.length + 1) * fontWidth;
-
-  const body = [
-    // vertical line
-    ['line', {
-      class: 'wd-cursor-line',
-      x1: xmargin + 0.5,
-      x2: xmargin + 0.5,
-      y1: 0,
-      y2: height
-    }],
-    // top time label
-    ['rect', {
-      class: 'wd-cursor-time',
-      x: xmargin - lWidth / 2,
-      y: 0,
-      width: lWidth,
-      height: fontHeight * 1.25
-    }],
-    ['text', {
-      class: 'wd-cursor-time',
-      x: xmargin,
-      y: fontHeight
-    }, label],
-    // bottom time label
-    ['rect', {
-      class: 'wd-cursor-time',
-      x: xmargin - lWidth / 2,
-      y: height - fontHeight * 1.25,
-      width: lWidth,
-      height: fontHeight * 1.25
-    }],
-    ['text', {
-      class: 'wd-cursor-time',
-      x: xmargin,
-      y: height - fontHeight * .25
-    }, label]
-  ];
-  return stringify(genSVG(2 * xmargin, height).concat(body));
-};
-
-module.exports = renderCursor;
-
-},{"./format-time.js":3,"onml/gen-svg.js":30,"onml/stringify.js":34}],21:[function(require,module,exports){
-'use strict';
-
-const tt = require('onml/tt.js');
-const genSVG = require('onml/gen-svg.js');
-const stringify = require('onml/stringify.js');
-// const getPco = require('./get-pco.js');
-const water = require('./water.js');
-const bracer = require('./bracer.js');
-const vline = require('./vline.js');
-const getX = require('./get-x.js');
-const vlineStylo = require('./vline-stylo.js');
-
-const defs = ['defs',
-  ['linearGradient', {id: 'valid'},
-    ['stop', {offset: '30%', 'stop-color': 'hsla(100, 100%, 100%,  0)'}],
-    ['stop', {offset: '90%', 'stop-color': 'hsla(100, 100%, 100%, .3)'}]
-  ],
-  ['linearGradient', {id: 'valid&ready'},
-    ['stop', {offset: '30%', 'stop-color': 'hsla(100, 100%, 50%,  0)'}],
-    ['stop', {offset: '90%', 'stop-color': 'hsla(100, 100%, 50%, .5)'}]
-  ],
-  ['linearGradient', {id: 'valid&~ready'},
-    ['stop', {offset: '30%', 'stop-color': 'hsla(50, 100%, 50%,  0)'}],
-    ['stop', {offset: '90%', 'stop-color': 'hsla(50, 100%, 50%, .5)'}]
-  ],
-  ...Object.keys(vlineStylo).map(key => {
-    const e = vlineStylo[key];
-    return ['filter', {id: 'neonGlow-' + key, width: 7, x: -3},
-      ['feGaussianBlur', {stdDeviation: 3, in: 'SourceAlpha', result: 'ablur'}],
-      ['feFlood', {'flood-color': `hsl(${e.h},100%,${e.l}%)`, result: 'xf'}],
-      ['feComposite', {in: 'xf', in2: 'ablur', operator: 'in'}]
-    ];
-  })
-];
-
-const getLabel = (vPre, mPre, x, w, fmt) => {
-  const radix = (fmt || {}).radix;
-  const base = ({
-    b: 2, o: 8, d: 10, h: 16, H: 16
-  })[radix] || 16;
-
-  if (mPre) {
-    if (vPre) {
-      return ['text', {x, class: 'zxviolet'}, '?'];
-    } else {
-      return ['text', {x, class: 'xred'}, 'x'];
-    }
-  } else {
-    const numPos = (w / 8) |0;
-    let txtOrig = vPre.toString(base);
-    if (radix === 'H') {
-      txtOrig = txtOrig.toUpperCase();
-    }
-
-    // ? txtOrig.slice(0, numPos - 1) + '\u22ef' // MSB
-    const txtShort = (txtOrig.length > numPos)
-      ? ((numPos === 1)
-        ? '\u22EE'
-        : '\u22EF' + txtOrig.slice(1 - numPos)) // LSB
-      : txtOrig;
-    return ['text', {x}, ['title', txtOrig], txtShort]; // idx.toString(36)]);
-  }
-};
-
-const renderValues = function* (desc, pstate) {
-  const { width, height, sidebarWidth, yOffset, yStep, topBarHeight, botBarHeight } = pstate;
-  const { view } = desc;
-
-  const ilen = height / yStep;
-  const iskip = yOffset / yStep;
-
-  // console.log(iskip, ilen, view.length);
-
-  const ml = genSVG(width, height - topBarHeight - botBarHeight);
-
-  let ifirst = 0;
-  for (let i = 0; i < ilen; i += 1) {
-    const lane = view[i];
-    if (lane && (lane.name || lane.kind)) {
-      if (i > iskip) {
-        break;
-      }
-      ifirst = i;
-    }
-  }
-  ml.push(defs);
-  yield;
-
-  const markers = ['g'];
-  ml.push(markers);
-
-  for (let i = 0; i < (iskip + ilen); i++) {
-    const lane = view[i + (ifirst |0)];
-
-    if (lane && lane.kind === 'DIZ') {
-      markers.push(['g', tt(0, Math.round((i - (iskip - ifirst) + 1.18) * yStep))].concat(water(lane, desc, pstate)));
-    } else
-
-    if (lane && lane.kind === 'brace') {
-      markers.push(['g', tt(0, Math.round((i - (iskip - ifirst) + 1.18) * yStep))].concat(bracer(lane, desc, pstate)));
-    } else
-
-    if (lane && lane.ref) {
-      const chango = desc.chango[lane.ref];
-      if (chango && chango.kind === 'vec') {
-        const mLane = ['g', tt(0, Math.round((i - (iskip - ifirst) + .9) * yStep))];
-        const { wave } = chango;
-        const jlen = wave.length;
-
-        perLane: {
-          let [tPre, vPre, mPre] = wave[0];
-          let xPre = getX(pstate, tPre);
-          for (let j = 1; j <= jlen; j++) {
-            const mark = wave[j];
-            const [tCur, vCur, mCur] = (mark || [desc.time, 0, 0]);
-            const xCur = getX(pstate, tCur);
-            if (vPre || mPre) {
-              if (xPre > width && xCur > width) { // both time stamps to the right
-                break perLane;
-              }
-              if (!((xPre < sidebarWidth)  && (xCur < sidebarWidth))) { // both time stamps to the left
-                const xPreNorm = ((xPre > sidebarWidth) ? xPre : sidebarWidth) |0;
-                const xCurNorm = ((xCur < width) ? xCur : width) |0;
-                const w = xCurNorm - xPreNorm;
-                if (w > 8) {
-                  const x = Math.round((xPreNorm + xCurNorm) / 2);
-                  mLane.push(getLabel(vPre, mPre, x, w, lane.format));
-                }
-              }
-            }
-            xPre = xCur;
-            vPre = vCur;
-            mPre = mCur;
-          }
-        }
-        ml.push(mLane);
-      }
-      yield;
-    }
-  }
-
-  // console.log(view);
-  for (let i = 0; i < view.length; i++) {
-    const lane = view[i];
-    if (lane && lane.vlines) {
-      markers.push(...vline(lane, pstate, i));
-    }
-  }
-  yield;
-  return stringify(ml);
-};
-
-module.exports = renderValues;
-/* eslint complexity: [1, 55] */
-
-},{"./bracer.js":1,"./get-x.js":11,"./vline-stylo.js":25,"./vline.js":26,"./water.js":27,"onml/gen-svg.js":30,"onml/stringify.js":34,"onml/tt.js":36}],22:[function(require,module,exports){
-'use strict';
-
-function* sampler (wave) {
-  let t1, v0, v1;
-  [t1, v1] = wave[0]; // initial state
-  let t = 0;
-  for (let i = 1; i < wave.length; i++) {
-    v0 = v1;
-    [t1, v1] = wave[i]; // next change
-    while (true) {
-      if (t >= t1) {
-        break;
-      }
-      t = yield v0;
-    }
-  }
-  while(true) { // to the end of time
-    yield v1;
-  }
-}
-
-module.exports = sampler;
-
-},{}],23:[function(require,module,exports){
-'use strict';
-
-const getT = require('./get-t.js');
-
-function* surferer (wave, pstate) {
-  const { sidebarWidth, width } = pstate;
-  const xStartExact = getT(sidebarWidth, pstate);
-  const xFinishExact = getT(width, pstate);
-
-  let i = 0;
-  for (i = 0; i < wave.length; i++) { // seek to the start of viewport
-    if ((wave[i] === undefined) || (wave[i][0] >= xStartExact)) {
-      break;
-    }
-  }
-  for (; i < wave.length; i++) { // render viewport
-    if ((wave[i] === undefined) || (wave[i][0] > xFinishExact)) {
-      break;
-    }
-    yield i;
-  }
-}
-
-module.exports = surferer;
-
-},{"./get-t.js":10}],24:[function(require,module,exports){
-'use strict';
-
-const helpPanel = require('./help-panel.js');
-
-const body = {
-  '*': {
-    // width: '90%',
-    'scrollbar-width': 'auto',
-    'scrollbar-color': '#aaa #555'
-  },
-  '*::-webkit-scrollbar': {
-    width: '8px'
-  },
-  '*::-webkit-scrollbar-track': {
-    background: '#555'
-  },
-  '*::-webkit-scrollbar-thumb': {
-    'background-color': '#777',
-    'border-radius': '4px',
-    border: '1px solid #aaa'
-  },
-  body: {
-    /* overflow-x: hidden; */
-    /* overflow-y: auto; */
-    overflow: 'hidden',
-    /* overflow: auto; */
-    padding: '0px',
-    margin: '0px',
-    border: '0px',
-    background: '#111',
-    color: '#fff',
-    'font-family': 'Iosevka Drom Web',
-    /* font-size: 16px; */
-    height: '100%'
-  }
-};
-
-const wd = {
-  '.wd-container': {
-    /* background-color: #1c1c1c; */
-    /* overflow-x: hidden; */
-    /* overflow-y: auto; */
-    /* overflow: hidden; */
-    /* overflow: auto; */
-    '--right-panel-width': '0px',
-    width: 'calc(100% - var(--right-panel-width))',
-    // height: '100%',
-    cursor: 'col-resize',
-    transition: 'width .3s',
-    position: 'absolute',
-    top: '0px',
-    bottom: '0px',
-    left: '0px',
-    right: '0px'
-  },
-  '.wd-grid': {
-    position: 'absolute'
-  },
-  '.wd-view': {
-    position: 'absolute',
-    top: '24px',
-    bottom: '24px'
-  },
-  '.wd-values': {
-    position: 'absolute',
-    top: '24px',
-    bottom: '24px'
-  },
-  '.wd-waveql': {
-    position: 'absolute',
-    top: '24px',
-    bottom: '24px',
-    width: 'calc(100% - var(--right-panel-width))',
-    transition: 'width .3s'
-    // width: '100%'
-  },
-  '.wd-cursor': {
-    position: 'absolute',
-    /* z-index: 1; */
-    'pointer-events': 'none'
-  },
-  'line.wd-cursor-line': {
-    'stroke-dasharray': '4 3',
-    stroke: '#fff7',
-    'stroke-width': '1px'
-  },
-  'text.wd-cursor-time': {
-    'font-size': '20px',
-    fill: 'hsl(70, 100%, 50%)',
-    'text-anchor': 'middle',
-    'z-index': 1
-  },
-  'rect.wd-cursor-time': {
-    fill: '#222'
-  },
-  '.wd-values text': {
-    'font-size': '14px',
-    'text-anchor': 'middle',
-    fill: '#fff'
-  },
-  'line.wd-grid-time': {
-    stroke: '#333',
-    'stroke-width': '1px'
-  },
-  'text.wd-grid-time': {
-    'text-anchor': 'middle',
-    fill: 'hsla(49, 100%, 50%, 0.7)'
-  },
-
-  '.wd-progress': {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)'
-  },
-
-  'text.xred': {
-    fill: 'hsl(0, 100%, 50%)'
-  },
-  'text.zxviolet': {
-    fill: 'hsl(287, 100%, 67%)'
-  },
-
-  'text.pc':          { 'text-anchor': 'start' },
-  'tspan.pc-addr':    { fill: 'hsl(202 100% 71%)' },
-  'tspan.pc-opcode':  { fill: 'hsl(37 100% 50%)' },
-  'tspan.pc-asm':     { fill: 'hsl(0 0% 100%)' },
-  'rect.pc-odd':      { fill: '#222' },
-  'rect.pc-even':     { fill: '#444' },
-
-  '.event0': { fill: 'hsla(0, 0%, 100%, 0.3)' },
-  '.event1': { fill: 'hsl(101, 100%, 50%)' },
-  '.event2': { fill: 'hsl(57, 100%, 50%)' },
-  '.event3': { fill: 'hsl(32, 100%, 50%)' },
-
-  'line.gap': { stroke: '#fff', 'stroke-dasharray': '4 3' }
-};
-
-const cto = {};
-for (let i = 0; i < 36; i++) {
-  cto['rect.ct' + i.toString(36)] = {
-    fill: 'hsla(' + (i * 10) + ', 100%, 50%, 0.5)'
-  };
-}
-
-const pco = {};
-for (let i = 0; i < 8; i++) {
-  cto['rect.pc' + i] = {
-    fill: 'none',
-    'stroke-width': '4px',
-    stroke: 'hsl(' + ((30 + i * 135) % 360) + ', 100%, 75%)'
-  };
-}
-
-module.exports = Object.assign(body, wd, helpPanel.css, cto, pco);
-
-/* eslint-env browser */
-
-},{"./help-panel.js":13}],25:[function(require,module,exports){
-'use strict';
-
-const vlineStylo = {
-  w: {h:0,   l:100}, // w
-  r: {h:10,  l:45}, // r
-  o: {h:33,  l:65}, // o
-  y: {h:55,  l:50}, // y
-  g: {h:120, l:75}, // g
-  c: {h:190, l:50}, // c
-  b: {h:215, l:70}, // b
-  v: {h:280, l:55} // v
-};
-
-module.exports = vlineStylo;
-
-},{}],26:[function(require,module,exports){
-'use strict';
-
-const getX = require('./get-x.js');
-const onml = require('onml');
-const vlineStylo = require('./vline-stylo.js');
-
-/* Zones
-1  2  3
-4  5  6
-7  8  9
-*/
-
-const vline = (lane, pstate, i) => {
-  const {width, height, timescale, yStep, yOffset, topBarHeight, botBarHeight} = pstate;
-  const y = (i + .7) * yStep - yOffset;
-  const yMax = height - topBarHeight - botBarHeight;
-
-  return lane.vlines.map(vline => {
-    const t = vline.value * Math.pow(10, vline.mult - timescale);
-    const x = Math.round(getX(pstate, t));
-    const style = (vlineStylo[vline.style] || vlineStylo.w);
-    const color = `hsl(${style.h},100%,${style.l}%)`;
-    const symbol = ['path', {style: 'stroke-width: 1px; stroke: ' + color}];
-
-    if ((x < 0) || (x > width)) {
-      if ((y < 0) || (y > yMax)) { // Zones: 1, 7, 3, 9
-        return ['g'];
-      }
-      if (x < 0) { // Zone: 4
-        symbol[1].d = `M ${0} ${y} l 8 -4 v 8 z`;
-        return symbol;
-      }
-      // Zone: 6
-      symbol[1].d = `M ${width - 16} ${y} l -8 -4 v 8 z`;
-      return symbol;
-    }
-
-    const line = ['g', onml.tt(x, 0),
-      ['rect', {x: -1, width: 3, height, fill: '#fff', filter: 'url(#neonGlow-' + vline.style + ')'}],
-      ['rect', {width: 1, height, fill: color}]
-    ];
-
-    if (y < 0) { // Zone: 2
-      symbol[1].d = `M ${x} ${topBarHeight} l 4 8 h -8 z`;
-      return ['g', line, symbol];
-    }
-    if (y > yMax) { // Zone: 8
-      symbol[1].d = `M ${x} ${yMax} l -4 -8 h 8 z`;
-      return ['g', line, symbol];
-    }
-    // Zone: 5
-    symbol[1].d = `M ${x} ${y} m-4 0 l 4 -4 l 4 4 l -4 4 z`;
-    return ['g', line, symbol];
-  });
-};
-
-module.exports = vline;
-
-},{"./get-x.js":11,"./vline-stylo.js":25,"onml":31}],27:[function(require,module,exports){
-'use strict';
-
-// PC based pipeline view
-
-const tt = require('onml/tt.js');
-const getX = require('./get-x.js');
-const surferer = require('./surferer.js');
-const sampler = require('./sampler.js');
-const hash = require('./hash.js');
-
-const pushBrick = (listing, pco, v, name, label, t) => {
-  let pc = v;
-  let tail = false;
-  let le = listing[pc];
-  if (le === undefined) {
-    pc = v - 2;
-    le = listing[pc];
-    tail = true;
-  }
-  if (le) {
-    if (pco[pc] === undefined) {
-      pco[pc] = {op: le.op, asm: le.asm, bricks: []};
-    }
-    pco[pc].bricks.push({name, label, t, tail});
-  }
-};
-
-const progress = (lane, desc, pstate) => {
-  const pco = {};
-
-  const { listing } = desc;
-  const { clock, othero } = lane;
-
-
-  if (desc.chango[clock.ref] === undefined) {
-    console.log(desc.chango, clock, clock.ref);
-    return pco;
-  }
-  const clockWave = desc.chango[clock.ref].wave;
-  const clockEr = surferer(clockWave, pstate);
-
-  // create samplers
-  for (const id of Object.keys(othero)) {
-    ['pc', 'go'].map(role => {
-      const obj = othero[id][role];
-      obj.sampler = sampler(desc.chango[obj.ref].wave);
-      obj.sampler.next(0); // dry run
-    });
-  }
-
-  let count = 8000; // max number of pipeline bricks
-
-  outerLoop: for (const iClock of clockEr) {
-    const [tClock, vClock] = clockWave[iClock];
-    if (vClock) {
-      for (const key of Object.keys(othero)) {
-        const id = othero[key];
-        const go = id.go.sampler.next(tClock).value;
-        const pc = id.pc.sampler.next(tClock).value;
-        const KEY = key.toUpperCase();
-        if (go) {
-          pushBrick(listing, pco, pc, KEY, KEY, tClock);
-          if (count-- === 0) {
-            break outerLoop;
-          }
-        }
-      }
-    }
-  }
-
-  for (const [idx, key] of Object.keys(pco).entries()) {
-    if (pco[key] !== undefined) {
-      pco[key].idx = idx;
-    }
-  }
-
-  return pco;
-};
-
-const water = (lane, desc, pstate) => {
-  const { width, yStep } = pstate;
-  const brickWidth = getX(pstate, 2) - getX(pstate, 0);
-
-  const pco = progress(lane, desc, pstate);
-
-  const pcs = Object.keys(pco).map(e => Number(e)).sort();
-
-  const mLanes = [];
-
-  // const pco = getPco(desc, pstate, lane); // signals, dats, cycles, listing, state.cursor);
-  for (let j = 0; j < lane.len - 2; j++) {
-    const pc = pcs[j];
-    const pcd = pco[pc];
-    if (pc === undefined || pcd === undefined) {
-      break;
-    }
-
-    const asm = pcd.asm.replace(/<.+>/, '\u25C6');
-    const mLane = ['g', tt(0, Math.round(j * yStep))];
-
-    // striped background
-    if (j & 1) {
-      mLane.push(['rect', {width: width, height: yStep - 1, class: 'pc-odd'}]);
-      // ['rect', {width: width, height: yStep - 2, class: (j & 1) ? 'pc-odd' : 'pc-even'}],
-    }
-
-    // dotted separator
-    if ((j > 0) && (pc - pcs[j - 1] > 4)) {
-      mLane.push(['line', {class: 'gap', x1: 0, y1: 0, x2: width, y2: 0}]);
-    }
-
-    // row header
-    mLane.push(['text', {class: 'pc', 'xml:space': 'preserve', y: Math.round(yStep * .7)},
-      ['tspan', {class: 'pc-addr'}, parseInt(pc, 10).toString(16).padStart(12, ' ')],
-      ['tspan', {class: 'pc-opcode'}, pcd.op.padStart(9, ' ')],
-      ' ',
-      ['tspan', {class: 'pc-asm'}, asm]
-    ]);
-
-    // bricks in row
-    pcd.bricks.map(e => {
-      mLane.push(['g', tt(Math.round(getX(pstate, e.t))),
-        ['rect', {
-          class: (e.label === '') ? e.name : 'ct' + hash(e.name).toString(36),
-          width: brickWidth,
-          height: (e.tail ? (yStep >> 1) : yStep) - 3,
-          y: e.tail ? ((yStep >> 1) + 1) : 1,
-          'data-stage': e.label
-        }],
-        ...((brickWidth > 20) ? [['text', {class: e.name, width: brickWidth, x: brickWidth / 2, y: 16}, e.label]] : [])
-      ]);
-    });
-
-    mLanes.push(mLane);
-  }
-  return mLanes;
-};
-
-
-module.exports = water;
-
-},{"./get-x.js":11,"./hash.js":12,"./sampler.js":22,"./surferer.js":23,"onml/tt.js":36}],28:[function(require,module,exports){
-'use strict';
-
-const xOffsetUpdate = (pstate, xOffsetNext) => {
-  let {width, xOffset, xScale, time, sidebarWidth} = pstate;
-
-  const xOffsetMax = sidebarWidth; // maximum offset
-  xOffsetNext = (xOffsetNext > xOffsetMax) ? xOffsetMax : xOffsetNext;
-
-  const xOffsetMin = width - xScale * time; // minimum offset
-  xOffsetNext = (xOffsetNext < xOffsetMin) ? xOffsetMin : xOffsetNext;
-
-  if (xOffsetNext === xOffset) {
-    return false; // exit without scroll
-  }
-
-  pstate.xOffset = xOffsetNext;
-  return true;
-};
-
-module.exports = xOffsetUpdate;
-
-},{}],29:[function(require,module,exports){
-'use strict';
-
-const xOffsetUpdate = require('./x-offset-update.js');
-
-const xScaleUpdate = (pstate, xScaleNext) => {
-  const {xOffset, xCursor, xScale, xScaleMin, xScaleMax} = pstate;
-
-  xScaleNext = (xScaleNext > xScaleMax) ? xScaleMax : xScaleNext;
-
-  xScaleNext = (xScaleNext < xScaleMin) ? xScaleMin : xScaleNext;
-
-  if (xScaleNext === xScale) {
-    return false; // exit without scale change
-  }
-  pstate.xScale = xScaleNext;
-
-  xOffsetUpdate(pstate, xCursor - (xCursor - xOffset) * xScaleNext / xScale);
-  return true;
-};
-
-module.exports = xScaleUpdate;
-
-},{"./x-offset-update.js":28}],30:[function(require,module,exports){
-'use strict';
-
-const w3 = {
-  svg: 'http://www.w3.org/2000/svg',
-  xlink: 'http://www.w3.org/1999/xlink',
-  xmlns: 'http://www.w3.org/XML/1998/namespace'
-};
-
-module.exports = (w, h) => ['svg', {
-  xmlns: w3.svg, 'xmlns:xlink': w3.xlink,
-  width: w, height: h,
-  viewBox: '0 0 ' + w + ' ' + h
-}];
-
-},{}],31:[function(require,module,exports){
-'use strict';
-
-const parse = require('./parse.js');
-const stringify = require('./stringify.js');
-const traverse = require('./traverse.js');
-const renderer = require('./renderer.js');
-const tt = require('./tt.js');
-const genSvg = require('./gen-svg.js');
-
-exports.renderer = renderer;
-exports.parse = parse;
-exports.stringify = stringify;
-exports.traverse = traverse;
-exports.tt = tt;
-
-exports.gen = {
-  svg: genSvg
-};
-
-exports.p = parse;
-exports.s = stringify;
-exports.t = traverse;
-
-},{"./gen-svg.js":30,"./parse.js":32,"./renderer.js":33,"./stringify.js":34,"./traverse.js":35,"./tt.js":36}],32:[function(require,module,exports){
-'use strict';
-
-const parser = require('sax').parser;
-
-function parse(data, config) {
-  const res = [];
-  const stack = [];
-  let pointer = res;
-  let trim = true;
-
-  let strict = true;
-  if (config && (config.strict !== undefined)) {
-    strict = config.strict;
-  }
-
-  if (config !== undefined) {
-    if (config.trim !== undefined) {
-      trim = config.trim;
-    }
-  }
-
-  const p = parser(strict);
-
-  p.ontext = function (e) {
-    if ((trim === false) || (e.trim() !== '')) {
-      pointer.push(e);
-    }
-  };
-
-  p.onopentag = function (e) {
-    const leaf = [e.name, e.attributes];
-    stack.push(pointer);
-    pointer.push(leaf);
-    pointer = leaf;
-  };
-
-  p.onclosetag = function () {
-    pointer = stack.pop();
-  };
-
-  p.oncdata = function (e) {
-    if ((trim === false) || (e.trim() !== '')) {
-      pointer.push('<![CDATA[' + e + ']]>');
-    }
-  };
-
-  p.write(data).close();
-  return res[0];
-}
-
-module.exports = parse;
-
-},{"sax":37}],33:[function(require,module,exports){
-'use strict';
-
-const stringify = require('./stringify.js');
-
-const renderer = root => {
-  const content = (typeof root === 'string')
-    ? document.getElementById(root)
-    : root;
-
-  return ml => {
-    let str;
-    try {
-      str = stringify(ml);
-      content.innerHTML = str;
-    } catch (err) {
-      console.log(ml);
-    }
-  };
-};
-
-module.exports = renderer;
-
-/* eslint-env browser */
-
-},{"./stringify.js":34}],34:[function(require,module,exports){
-'use strict';
-
-const isObject = o => o && Object.prototype.toString.call(o) === '[object Object]';
-
-function indenter (indentation) {
-  if (!(indentation > 0)) {
-    return txt => txt;
-  }
-  var space = ' '.repeat(indentation);
-  return txt => {
-
-    if (typeof txt !== 'string') {
-      return txt;
-    }
-
-    const arr = txt.split('\n');
-
-    if (arr.length === 1) {
-      return space + txt;
-    }
-
-    return arr
-      .map(e => (e.trim() === '') ? e : space + e)
-      .join('\n');
-  };
-}
-
-const clean = txt => txt
-  .split('\n')
-  .filter(e => e.trim() !== '')
-  .join('\n');
-
-function stringify (a, indentation) {
-  const cr = (indentation > 0) ? '\n' : '';
-  const indent = indenter(indentation);
-
-  function rec(a) {
-    let body = '';
-    let isFlat = true;
-
-    let res;
-    const isEmpty = a.some((e, i, arr) => {
-      if (i === 0) {
-        res = '<' + e;
-        return (arr.length === 1);
-      }
-
-      if (i === 1) {
-        if (isObject(e)) {
-          Object.keys(e).map(key => {
-            let val = e[key];
-            if (Array.isArray(val)) {
-              val = val.join(' ');
-            }
-            res += ' ' + key + '="' + val + '"';
-          });
-          if (arr.length === 2) {
-            return true;
-          }
-          res += '>';
-          return;
-        }
-        res += '>';
-      }
-
-      switch (typeof e) {
-      case 'string':
-      case 'number':
-      case 'boolean':
-      case 'undefined':
-        body += e + cr;
-        return;
-      }
-
-      isFlat = false;
-      body += rec(e);
-    });
-
-    if (isEmpty) {
-      return res + '/>' + cr; // short form
-    }
-
-    return isFlat
-      ? res + clean(body) + '</' + a[0] + '>' + cr
-      : res + cr + indent(body) + '</' + a[0] + '>' + cr;
-  }
-
-  return rec(a);
-}
-
-module.exports = stringify;
-
-},{}],35:[function(require,module,exports){
-'use strict';
-
-function skipFn() {
-  this._skip = true;
-}
-
-function removeFn() {
-  this._remove = true;
-}
-
-function nameFn(name) {
-  this._name = name;
-}
-
-function replaceFn(node) {
-  this._replace = node;
-}
-
-function traverse(origin, callbacks) {
-  const empty = function() {};
-
-  const enter = callbacks && callbacks.enter || empty;
-  const leave = callbacks && callbacks.leave || empty;
-
-
-  function rec(tree, parent) {
-    if (tree === undefined) return;
-    if (tree === null) return;
-    if (tree === true) return;
-    if (tree === false) return;
-
-    const node = {
-      attr: {},
-      full: tree
-    };
-
-    const cxt = {
-      name: nameFn,
-      skip: skipFn,
-      // break: breakFn,
-      remove: removeFn,
-      replace: replaceFn,
-
-      _name: undefined,
-      _skip: false,
-      // _break: false,
-      _remove: false,
-      _replace: undefined
-    };
-
-    let e1IsNotAnObject = true;
-
-    switch (Object.prototype.toString.call(tree)) {
-    case '[object String]':
-    case '[object Number]':
-      return;
-
-    case '[object Array]':
-      tree.some(function(e, i) {
-        if (i === 0) {
-          node.name = e;
-          return false;
-        }
-        if (i === 1) {
-          if (
-            Object.prototype.toString.call(e) === '[object Object]'
-          ) {
-            e1IsNotAnObject = false;
-            node.attr = e;
-          }
-          return true;
-        }
-      });
-
-      enter.call(cxt, node, parent);
-
-      if (cxt._name) {
-        tree[0] = cxt._name;
-      }
-
-      if (cxt._replace) {
-        return cxt._replace;
-      }
-
-      if (cxt._remove) {
-        return null;
-      }
-
-      if (!cxt._skip) {
-        let index = 0;
-        let ilen = tree.length;
-        while (index < ilen) {
-          if ((index > 1) || ((index === 1) && e1IsNotAnObject)) {
-            const returnRes = rec(tree[index], node);
-            if (returnRes === null) {
-              tree.splice(index, 1);
-              ilen -= 1;
-              continue;
-            }
-            if (returnRes) {
-              tree[index] = returnRes;
-            }
-          }
-          index += 1;
-        }
-
-        leave.call(cxt, node, parent);
-        if (cxt._name) {
-          tree[0] = cxt._name;
-        }
-        if (cxt._replace) {
-          return cxt._replace;
-        }
-        if (cxt._remove) {
-          return null;
-        }
-      }
-    }
-  }
-
-  rec(origin, undefined);
-}
-
-module.exports = traverse;
-
-/* eslint complexity: 0 */
-
-},{}],36:[function(require,module,exports){
-'use strict';
-
-module.exports = (x, y, obj) => {
-  let objt = {};
-  if (x || y) {
-    const tt = [x || 0].concat(y ? [y] : []);
-    objt = {transform: 'translate(' + tt.join(',') + ')'};
-  }
-  obj = (typeof obj === 'object') ? obj : {};
-  return Object.assign(objt, obj);
-};
-
-},{}],37:[function(require,module,exports){
-(function (Buffer){(function (){
-;(function (sax) { // wrapper for non-node envs
-  sax.parser = function (strict, opt) { return new SAXParser(strict, opt) }
-  sax.SAXParser = SAXParser
-  sax.SAXStream = SAXStream
-  sax.createStream = createStream
-
-  // When we pass the MAX_BUFFER_LENGTH position, start checking for buffer overruns.
-  // When we check, schedule the next check for MAX_BUFFER_LENGTH - (max(buffer lengths)),
-  // since that's the earliest that a buffer overrun could occur.  This way, checks are
-  // as rare as required, but as often as necessary to ensure never crossing this bound.
-  // Furthermore, buffers are only tested at most once per write(), so passing a very
-  // large string into write() might have undesirable effects, but this is manageable by
-  // the caller, so it is assumed to be safe.  Thus, a call to write() may, in the extreme
-  // edge case, result in creating at most one complete copy of the string passed in.
-  // Set to Infinity to have unlimited buffers.
-  sax.MAX_BUFFER_LENGTH = 64 * 1024
-
-  var buffers = [
-    'comment', 'sgmlDecl', 'textNode', 'tagName', 'doctype',
-    'procInstName', 'procInstBody', 'entity', 'attribName',
-    'attribValue', 'cdata', 'script'
-  ]
-
-  sax.EVENTS = [
-    'text',
-    'processinginstruction',
-    'sgmldeclaration',
-    'doctype',
-    'comment',
-    'opentagstart',
-    'attribute',
-    'opentag',
-    'closetag',
-    'opencdata',
-    'cdata',
-    'closecdata',
-    'error',
-    'end',
-    'ready',
-    'script',
-    'opennamespace',
-    'closenamespace'
-  ]
-
-  function SAXParser (strict, opt) {
-    if (!(this instanceof SAXParser)) {
-      return new SAXParser(strict, opt)
-    }
-
-    var parser = this
-    clearBuffers(parser)
-    parser.q = parser.c = ''
-    parser.bufferCheckPosition = sax.MAX_BUFFER_LENGTH
-    parser.opt = opt || {}
-    parser.opt.lowercase = parser.opt.lowercase || parser.opt.lowercasetags
-    parser.looseCase = parser.opt.lowercase ? 'toLowerCase' : 'toUpperCase'
-    parser.tags = []
-    parser.closed = parser.closedRoot = parser.sawRoot = false
-    parser.tag = parser.error = null
-    parser.strict = !!strict
-    parser.noscript = !!(strict || parser.opt.noscript)
-    parser.state = S.BEGIN
-    parser.strictEntities = parser.opt.strictEntities
-    parser.ENTITIES = parser.strictEntities ? Object.create(sax.XML_ENTITIES) : Object.create(sax.ENTITIES)
-    parser.attribList = []
-
-    // namespaces form a prototype chain.
-    // it always points at the current tag,
-    // which protos to its parent tag.
-    if (parser.opt.xmlns) {
-      parser.ns = Object.create(rootNS)
-    }
-
-    // mostly just for error reporting
-    parser.trackPosition = parser.opt.position !== false
-    if (parser.trackPosition) {
-      parser.position = parser.line = parser.column = 0
-    }
-    emit(parser, 'onready')
-  }
-
-  if (!Object.create) {
-    Object.create = function (o) {
-      function F () {}
-      F.prototype = o
-      var newf = new F()
-      return newf
-    }
-  }
-
-  if (!Object.keys) {
-    Object.keys = function (o) {
-      var a = []
-      for (var i in o) if (o.hasOwnProperty(i)) a.push(i)
-      return a
-    }
-  }
-
-  function checkBufferLength (parser) {
-    var maxAllowed = Math.max(sax.MAX_BUFFER_LENGTH, 10)
-    var maxActual = 0
-    for (var i = 0, l = buffers.length; i < l; i++) {
-      var len = parser[buffers[i]].length
-      if (len > maxAllowed) {
-        // Text/cdata nodes can get big, and since they're buffered,
-        // we can get here under normal conditions.
-        // Avoid issues by emitting the text node now,
-        // so at least it won't get any bigger.
-        switch (buffers[i]) {
-          case 'textNode':
-            closeText(parser)
-            break
-
-          case 'cdata':
-            emitNode(parser, 'oncdata', parser.cdata)
-            parser.cdata = ''
-            break
-
-          case 'script':
-            emitNode(parser, 'onscript', parser.script)
-            parser.script = ''
-            break
-
-          default:
-            error(parser, 'Max buffer length exceeded: ' + buffers[i])
-        }
-      }
-      maxActual = Math.max(maxActual, len)
-    }
-    // schedule the next check for the earliest possible buffer overrun.
-    var m = sax.MAX_BUFFER_LENGTH - maxActual
-    parser.bufferCheckPosition = m + parser.position
-  }
-
-  function clearBuffers (parser) {
-    for (var i = 0, l = buffers.length; i < l; i++) {
-      parser[buffers[i]] = ''
-    }
-  }
-
-  function flushBuffers (parser) {
-    closeText(parser)
-    if (parser.cdata !== '') {
-      emitNode(parser, 'oncdata', parser.cdata)
-      parser.cdata = ''
-    }
-    if (parser.script !== '') {
-      emitNode(parser, 'onscript', parser.script)
-      parser.script = ''
-    }
-  }
-
-  SAXParser.prototype = {
-    end: function () { end(this) },
-    write: write,
-    resume: function () { this.error = null; return this },
-    close: function () { return this.write(null) },
-    flush: function () { flushBuffers(this) }
-  }
-
-  var Stream
-  try {
-    Stream = require('stream').Stream
-  } catch (ex) {
-    Stream = function () {}
-  }
-
-  var streamWraps = sax.EVENTS.filter(function (ev) {
-    return ev !== 'error' && ev !== 'end'
-  })
-
-  function createStream (strict, opt) {
-    return new SAXStream(strict, opt)
-  }
-
-  function SAXStream (strict, opt) {
-    if (!(this instanceof SAXStream)) {
-      return new SAXStream(strict, opt)
-    }
-
-    Stream.apply(this)
-
-    this._parser = new SAXParser(strict, opt)
-    this.writable = true
-    this.readable = true
-
-    var me = this
-
-    this._parser.onend = function () {
-      me.emit('end')
-    }
-
-    this._parser.onerror = function (er) {
-      me.emit('error', er)
-
-      // if didn't throw, then means error was handled.
-      // go ahead and clear error, so we can write again.
-      me._parser.error = null
-    }
-
-    this._decoder = null
-
-    streamWraps.forEach(function (ev) {
-      Object.defineProperty(me, 'on' + ev, {
-        get: function () {
-          return me._parser['on' + ev]
-        },
-        set: function (h) {
-          if (!h) {
-            me.removeAllListeners(ev)
-            me._parser['on' + ev] = h
-            return h
-          }
-          me.on(ev, h)
-        },
-        enumerable: true,
-        configurable: false
-      })
-    })
-  }
-
-  SAXStream.prototype = Object.create(Stream.prototype, {
-    constructor: {
-      value: SAXStream
-    }
-  })
-
-  SAXStream.prototype.write = function (data) {
-    if (typeof Buffer === 'function' &&
-      typeof Buffer.isBuffer === 'function' &&
-      Buffer.isBuffer(data)) {
-      if (!this._decoder) {
-        var SD = require('string_decoder').StringDecoder
-        this._decoder = new SD('utf8')
-      }
-      data = this._decoder.write(data)
-    }
-
-    this._parser.write(data.toString())
-    this.emit('data', data)
-    return true
-  }
-
-  SAXStream.prototype.end = function (chunk) {
-    if (chunk && chunk.length) {
-      this.write(chunk)
-    }
-    this._parser.end()
-    return true
-  }
-
-  SAXStream.prototype.on = function (ev, handler) {
-    var me = this
-    if (!me._parser['on' + ev] && streamWraps.indexOf(ev) !== -1) {
-      me._parser['on' + ev] = function () {
-        var args = arguments.length === 1 ? [arguments[0]] : Array.apply(null, arguments)
-        args.splice(0, 0, ev)
-        me.emit.apply(me, args)
-      }
-    }
-
-    return Stream.prototype.on.call(me, ev, handler)
-  }
-
-  // this really needs to be replaced with character classes.
-  // XML allows all manner of ridiculous numbers and digits.
-  var CDATA = '[CDATA['
-  var DOCTYPE = 'DOCTYPE'
-  var XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
-  var XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/'
-  var rootNS = { xml: XML_NAMESPACE, xmlns: XMLNS_NAMESPACE }
-
-  // http://www.w3.org/TR/REC-xml/#NT-NameStartChar
-  // This implementation works on strings, a single character at a time
-  // as such, it cannot ever support astral-plane characters (10000-EFFFF)
-  // without a significant breaking change to either this  parser, or the
-  // JavaScript language.  Implementation of an emoji-capable xml parser
-  // is left as an exercise for the reader.
-  var nameStart = /[:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/
-
-  var nameBody = /[:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u00B7\u0300-\u036F\u203F-\u2040.\d-]/
-
-  var entityStart = /[#:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/
-  var entityBody = /[#:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u00B7\u0300-\u036F\u203F-\u2040.\d-]/
-
-  function isWhitespace (c) {
-    return c === ' ' || c === '\n' || c === '\r' || c === '\t'
-  }
-
-  function isQuote (c) {
-    return c === '"' || c === '\''
-  }
-
-  function isAttribEnd (c) {
-    return c === '>' || isWhitespace(c)
-  }
-
-  function isMatch (regex, c) {
-    return regex.test(c)
-  }
-
-  function notMatch (regex, c) {
-    return !isMatch(regex, c)
-  }
-
-  var S = 0
-  sax.STATE = {
-    BEGIN: S++, // leading byte order mark or whitespace
-    BEGIN_WHITESPACE: S++, // leading whitespace
-    TEXT: S++, // general stuff
-    TEXT_ENTITY: S++, // &amp and such.
-    OPEN_WAKA: S++, // <
-    SGML_DECL: S++, // <!BLARG
-    SGML_DECL_QUOTED: S++, // <!BLARG foo "bar
-    DOCTYPE: S++, // <!DOCTYPE
-    DOCTYPE_QUOTED: S++, // <!DOCTYPE "//blah
-    DOCTYPE_DTD: S++, // <!DOCTYPE "//blah" [ ...
-    DOCTYPE_DTD_QUOTED: S++, // <!DOCTYPE "//blah" [ "foo
-    COMMENT_STARTING: S++, // <!-
-    COMMENT: S++, // <!--
-    COMMENT_ENDING: S++, // <!-- blah -
-    COMMENT_ENDED: S++, // <!-- blah --
-    CDATA: S++, // <![CDATA[ something
-    CDATA_ENDING: S++, // ]
-    CDATA_ENDING_2: S++, // ]]
-    PROC_INST: S++, // <?hi
-    PROC_INST_BODY: S++, // <?hi there
-    PROC_INST_ENDING: S++, // <?hi "there" ?
-    OPEN_TAG: S++, // <strong
-    OPEN_TAG_SLASH: S++, // <strong /
-    ATTRIB: S++, // <a
-    ATTRIB_NAME: S++, // <a foo
-    ATTRIB_NAME_SAW_WHITE: S++, // <a foo _
-    ATTRIB_VALUE: S++, // <a foo=
-    ATTRIB_VALUE_QUOTED: S++, // <a foo="bar
-    ATTRIB_VALUE_CLOSED: S++, // <a foo="bar"
-    ATTRIB_VALUE_UNQUOTED: S++, // <a foo=bar
-    ATTRIB_VALUE_ENTITY_Q: S++, // <foo bar="&quot;"
-    ATTRIB_VALUE_ENTITY_U: S++, // <foo bar=&quot
-    CLOSE_TAG: S++, // </a
-    CLOSE_TAG_SAW_WHITE: S++, // </a   >
-    SCRIPT: S++, // <script> ...
-    SCRIPT_ENDING: S++ // <script> ... <
-  }
-
-  sax.XML_ENTITIES = {
-    'amp': '&',
-    'gt': '>',
-    'lt': '<',
-    'quot': '"',
-    'apos': "'"
-  }
-
-  sax.ENTITIES = {
-    'amp': '&',
-    'gt': '>',
-    'lt': '<',
-    'quot': '"',
-    'apos': "'",
-    'AElig': 198,
-    'Aacute': 193,
-    'Acirc': 194,
-    'Agrave': 192,
-    'Aring': 197,
-    'Atilde': 195,
-    'Auml': 196,
-    'Ccedil': 199,
-    'ETH': 208,
-    'Eacute': 201,
-    'Ecirc': 202,
-    'Egrave': 200,
-    'Euml': 203,
-    'Iacute': 205,
-    'Icirc': 206,
-    'Igrave': 204,
-    'Iuml': 207,
-    'Ntilde': 209,
-    'Oacute': 211,
-    'Ocirc': 212,
-    'Ograve': 210,
-    'Oslash': 216,
-    'Otilde': 213,
-    'Ouml': 214,
-    'THORN': 222,
-    'Uacute': 218,
-    'Ucirc': 219,
-    'Ugrave': 217,
-    'Uuml': 220,
-    'Yacute': 221,
-    'aacute': 225,
-    'acirc': 226,
-    'aelig': 230,
-    'agrave': 224,
-    'aring': 229,
-    'atilde': 227,
-    'auml': 228,
-    'ccedil': 231,
-    'eacute': 233,
-    'ecirc': 234,
-    'egrave': 232,
-    'eth': 240,
-    'euml': 235,
-    'iacute': 237,
-    'icirc': 238,
-    'igrave': 236,
-    'iuml': 239,
-    'ntilde': 241,
-    'oacute': 243,
-    'ocirc': 244,
-    'ograve': 242,
-    'oslash': 248,
-    'otilde': 245,
-    'ouml': 246,
-    'szlig': 223,
-    'thorn': 254,
-    'uacute': 250,
-    'ucirc': 251,
-    'ugrave': 249,
-    'uuml': 252,
-    'yacute': 253,
-    'yuml': 255,
-    'copy': 169,
-    'reg': 174,
-    'nbsp': 160,
-    'iexcl': 161,
-    'cent': 162,
-    'pound': 163,
-    'curren': 164,
-    'yen': 165,
-    'brvbar': 166,
-    'sect': 167,
-    'uml': 168,
-    'ordf': 170,
-    'laquo': 171,
-    'not': 172,
-    'shy': 173,
-    'macr': 175,
-    'deg': 176,
-    'plusmn': 177,
-    'sup1': 185,
-    'sup2': 178,
-    'sup3': 179,
-    'acute': 180,
-    'micro': 181,
-    'para': 182,
-    'middot': 183,
-    'cedil': 184,
-    'ordm': 186,
-    'raquo': 187,
-    'frac14': 188,
-    'frac12': 189,
-    'frac34': 190,
-    'iquest': 191,
-    'times': 215,
-    'divide': 247,
-    'OElig': 338,
-    'oelig': 339,
-    'Scaron': 352,
-    'scaron': 353,
-    'Yuml': 376,
-    'fnof': 402,
-    'circ': 710,
-    'tilde': 732,
-    'Alpha': 913,
-    'Beta': 914,
-    'Gamma': 915,
-    'Delta': 916,
-    'Epsilon': 917,
-    'Zeta': 918,
-    'Eta': 919,
-    'Theta': 920,
-    'Iota': 921,
-    'Kappa': 922,
-    'Lambda': 923,
-    'Mu': 924,
-    'Nu': 925,
-    'Xi': 926,
-    'Omicron': 927,
-    'Pi': 928,
-    'Rho': 929,
-    'Sigma': 931,
-    'Tau': 932,
-    'Upsilon': 933,
-    'Phi': 934,
-    'Chi': 935,
-    'Psi': 936,
-    'Omega': 937,
-    'alpha': 945,
-    'beta': 946,
-    'gamma': 947,
-    'delta': 948,
-    'epsilon': 949,
-    'zeta': 950,
-    'eta': 951,
-    'theta': 952,
-    'iota': 953,
-    'kappa': 954,
-    'lambda': 955,
-    'mu': 956,
-    'nu': 957,
-    'xi': 958,
-    'omicron': 959,
-    'pi': 960,
-    'rho': 961,
-    'sigmaf': 962,
-    'sigma': 963,
-    'tau': 964,
-    'upsilon': 965,
-    'phi': 966,
-    'chi': 967,
-    'psi': 968,
-    'omega': 969,
-    'thetasym': 977,
-    'upsih': 978,
-    'piv': 982,
-    'ensp': 8194,
-    'emsp': 8195,
-    'thinsp': 8201,
-    'zwnj': 8204,
-    'zwj': 8205,
-    'lrm': 8206,
-    'rlm': 8207,
-    'ndash': 8211,
-    'mdash': 8212,
-    'lsquo': 8216,
-    'rsquo': 8217,
-    'sbquo': 8218,
-    'ldquo': 8220,
-    'rdquo': 8221,
-    'bdquo': 8222,
-    'dagger': 8224,
-    'Dagger': 8225,
-    'bull': 8226,
-    'hellip': 8230,
-    'permil': 8240,
-    'prime': 8242,
-    'Prime': 8243,
-    'lsaquo': 8249,
-    'rsaquo': 8250,
-    'oline': 8254,
-    'frasl': 8260,
-    'euro': 8364,
-    'image': 8465,
-    'weierp': 8472,
-    'real': 8476,
-    'trade': 8482,
-    'alefsym': 8501,
-    'larr': 8592,
-    'uarr': 8593,
-    'rarr': 8594,
-    'darr': 8595,
-    'harr': 8596,
-    'crarr': 8629,
-    'lArr': 8656,
-    'uArr': 8657,
-    'rArr': 8658,
-    'dArr': 8659,
-    'hArr': 8660,
-    'forall': 8704,
-    'part': 8706,
-    'exist': 8707,
-    'empty': 8709,
-    'nabla': 8711,
-    'isin': 8712,
-    'notin': 8713,
-    'ni': 8715,
-    'prod': 8719,
-    'sum': 8721,
-    'minus': 8722,
-    'lowast': 8727,
-    'radic': 8730,
-    'prop': 8733,
-    'infin': 8734,
-    'ang': 8736,
-    'and': 8743,
-    'or': 8744,
-    'cap': 8745,
-    'cup': 8746,
-    'int': 8747,
-    'there4': 8756,
-    'sim': 8764,
-    'cong': 8773,
-    'asymp': 8776,
-    'ne': 8800,
-    'equiv': 8801,
-    'le': 8804,
-    'ge': 8805,
-    'sub': 8834,
-    'sup': 8835,
-    'nsub': 8836,
-    'sube': 8838,
-    'supe': 8839,
-    'oplus': 8853,
-    'otimes': 8855,
-    'perp': 8869,
-    'sdot': 8901,
-    'lceil': 8968,
-    'rceil': 8969,
-    'lfloor': 8970,
-    'rfloor': 8971,
-    'lang': 9001,
-    'rang': 9002,
-    'loz': 9674,
-    'spades': 9824,
-    'clubs': 9827,
-    'hearts': 9829,
-    'diams': 9830
-  }
-
-  Object.keys(sax.ENTITIES).forEach(function (key) {
-    var e = sax.ENTITIES[key]
-    var s = typeof e === 'number' ? String.fromCharCode(e) : e
-    sax.ENTITIES[key] = s
-  })
-
-  for (var s in sax.STATE) {
-    sax.STATE[sax.STATE[s]] = s
-  }
-
-  // shorthand
-  S = sax.STATE
-
-  function emit (parser, event, data) {
-    parser[event] && parser[event](data)
-  }
-
-  function emitNode (parser, nodeType, data) {
-    if (parser.textNode) closeText(parser)
-    emit(parser, nodeType, data)
-  }
-
-  function closeText (parser) {
-    parser.textNode = textopts(parser.opt, parser.textNode)
-    if (parser.textNode) emit(parser, 'ontext', parser.textNode)
-    parser.textNode = ''
-  }
-
-  function textopts (opt, text) {
-    if (opt.trim) text = text.trim()
-    if (opt.normalize) text = text.replace(/\s+/g, ' ')
-    return text
-  }
-
-  function error (parser, er) {
-    closeText(parser)
-    if (parser.trackPosition) {
-      er += '\nLine: ' + parser.line +
-        '\nColumn: ' + parser.column +
-        '\nChar: ' + parser.c
-    }
-    er = new Error(er)
-    parser.error = er
-    emit(parser, 'onerror', er)
-    return parser
-  }
-
-  function end (parser) {
-    if (parser.sawRoot && !parser.closedRoot) strictFail(parser, 'Unclosed root tag')
-    if ((parser.state !== S.BEGIN) &&
-      (parser.state !== S.BEGIN_WHITESPACE) &&
-      (parser.state !== S.TEXT)) {
-      error(parser, 'Unexpected end')
-    }
-    closeText(parser)
-    parser.c = ''
-    parser.closed = true
-    emit(parser, 'onend')
-    SAXParser.call(parser, parser.strict, parser.opt)
-    return parser
-  }
-
-  function strictFail (parser, message) {
-    if (typeof parser !== 'object' || !(parser instanceof SAXParser)) {
-      throw new Error('bad call to strictFail')
-    }
-    if (parser.strict) {
-      error(parser, message)
-    }
-  }
-
-  function newTag (parser) {
-    if (!parser.strict) parser.tagName = parser.tagName[parser.looseCase]()
-    var parent = parser.tags[parser.tags.length - 1] || parser
-    var tag = parser.tag = { name: parser.tagName, attributes: {} }
-
-    // will be overridden if tag contails an xmlns="foo" or xmlns:foo="bar"
-    if (parser.opt.xmlns) {
-      tag.ns = parent.ns
-    }
-    parser.attribList.length = 0
-    emitNode(parser, 'onopentagstart', tag)
-  }
-
-  function qname (name, attribute) {
-    var i = name.indexOf(':')
-    var qualName = i < 0 ? [ '', name ] : name.split(':')
-    var prefix = qualName[0]
-    var local = qualName[1]
-
-    // <x "xmlns"="http://foo">
-    if (attribute && name === 'xmlns') {
-      prefix = 'xmlns'
-      local = ''
-    }
-
-    return { prefix: prefix, local: local }
-  }
-
-  function attrib (parser) {
-    if (!parser.strict) {
-      parser.attribName = parser.attribName[parser.looseCase]()
-    }
-
-    if (parser.attribList.indexOf(parser.attribName) !== -1 ||
-      parser.tag.attributes.hasOwnProperty(parser.attribName)) {
-      parser.attribName = parser.attribValue = ''
-      return
-    }
-
-    if (parser.opt.xmlns) {
-      var qn = qname(parser.attribName, true)
-      var prefix = qn.prefix
-      var local = qn.local
-
-      if (prefix === 'xmlns') {
-        // namespace binding attribute. push the binding into scope
-        if (local === 'xml' && parser.attribValue !== XML_NAMESPACE) {
-          strictFail(parser,
-            'xml: prefix must be bound to ' + XML_NAMESPACE + '\n' +
-            'Actual: ' + parser.attribValue)
-        } else if (local === 'xmlns' && parser.attribValue !== XMLNS_NAMESPACE) {
-          strictFail(parser,
-            'xmlns: prefix must be bound to ' + XMLNS_NAMESPACE + '\n' +
-            'Actual: ' + parser.attribValue)
-        } else {
-          var tag = parser.tag
-          var parent = parser.tags[parser.tags.length - 1] || parser
-          if (tag.ns === parent.ns) {
-            tag.ns = Object.create(parent.ns)
-          }
-          tag.ns[local] = parser.attribValue
-        }
-      }
-
-      // defer onattribute events until all attributes have been seen
-      // so any new bindings can take effect. preserve attribute order
-      // so deferred events can be emitted in document order
-      parser.attribList.push([parser.attribName, parser.attribValue])
-    } else {
-      // in non-xmlns mode, we can emit the event right away
-      parser.tag.attributes[parser.attribName] = parser.attribValue
-      emitNode(parser, 'onattribute', {
-        name: parser.attribName,
-        value: parser.attribValue
-      })
-    }
-
-    parser.attribName = parser.attribValue = ''
-  }
-
-  function openTag (parser, selfClosing) {
-    if (parser.opt.xmlns) {
-      // emit namespace binding events
-      var tag = parser.tag
-
-      // add namespace info to tag
-      var qn = qname(parser.tagName)
-      tag.prefix = qn.prefix
-      tag.local = qn.local
-      tag.uri = tag.ns[qn.prefix] || ''
-
-      if (tag.prefix && !tag.uri) {
-        strictFail(parser, 'Unbound namespace prefix: ' +
-          JSON.stringify(parser.tagName))
-        tag.uri = qn.prefix
-      }
-
-      var parent = parser.tags[parser.tags.length - 1] || parser
-      if (tag.ns && parent.ns !== tag.ns) {
-        Object.keys(tag.ns).forEach(function (p) {
-          emitNode(parser, 'onopennamespace', {
-            prefix: p,
-            uri: tag.ns[p]
-          })
-        })
-      }
-
-      // handle deferred onattribute events
-      // Note: do not apply default ns to attributes:
-      //   http://www.w3.org/TR/REC-xml-names/#defaulting
-      for (var i = 0, l = parser.attribList.length; i < l; i++) {
-        var nv = parser.attribList[i]
-        var name = nv[0]
-        var value = nv[1]
-        var qualName = qname(name, true)
-        var prefix = qualName.prefix
-        var local = qualName.local
-        var uri = prefix === '' ? '' : (tag.ns[prefix] || '')
-        var a = {
-          name: name,
-          value: value,
-          prefix: prefix,
-          local: local,
-          uri: uri
-        }
-
-        // if there's any attributes with an undefined namespace,
-        // then fail on them now.
-        if (prefix && prefix !== 'xmlns' && !uri) {
-          strictFail(parser, 'Unbound namespace prefix: ' +
-            JSON.stringify(prefix))
-          a.uri = prefix
-        }
-        parser.tag.attributes[name] = a
-        emitNode(parser, 'onattribute', a)
-      }
-      parser.attribList.length = 0
-    }
-
-    parser.tag.isSelfClosing = !!selfClosing
-
-    // process the tag
-    parser.sawRoot = true
-    parser.tags.push(parser.tag)
-    emitNode(parser, 'onopentag', parser.tag)
-    if (!selfClosing) {
-      // special case for <script> in non-strict mode.
-      if (!parser.noscript && parser.tagName.toLowerCase() === 'script') {
-        parser.state = S.SCRIPT
-      } else {
-        parser.state = S.TEXT
-      }
-      parser.tag = null
-      parser.tagName = ''
-    }
-    parser.attribName = parser.attribValue = ''
-    parser.attribList.length = 0
-  }
-
-  function closeTag (parser) {
-    if (!parser.tagName) {
-      strictFail(parser, 'Weird empty close tag.')
-      parser.textNode += '</>'
-      parser.state = S.TEXT
-      return
-    }
-
-    if (parser.script) {
-      if (parser.tagName !== 'script') {
-        parser.script += '</' + parser.tagName + '>'
-        parser.tagName = ''
-        parser.state = S.SCRIPT
-        return
-      }
-      emitNode(parser, 'onscript', parser.script)
-      parser.script = ''
-    }
-
-    // first make sure that the closing tag actually exists.
-    // <a><b></c></b></a> will close everything, otherwise.
-    var t = parser.tags.length
-    var tagName = parser.tagName
-    if (!parser.strict) {
-      tagName = tagName[parser.looseCase]()
-    }
-    var closeTo = tagName
-    while (t--) {
-      var close = parser.tags[t]
-      if (close.name !== closeTo) {
-        // fail the first time in strict mode
-        strictFail(parser, 'Unexpected close tag')
-      } else {
-        break
-      }
-    }
-
-    // didn't find it.  we already failed for strict, so just abort.
-    if (t < 0) {
-      strictFail(parser, 'Unmatched closing tag: ' + parser.tagName)
-      parser.textNode += '</' + parser.tagName + '>'
-      parser.state = S.TEXT
-      return
-    }
-    parser.tagName = tagName
-    var s = parser.tags.length
-    while (s-- > t) {
-      var tag = parser.tag = parser.tags.pop()
-      parser.tagName = parser.tag.name
-      emitNode(parser, 'onclosetag', parser.tagName)
-
-      var x = {}
-      for (var i in tag.ns) {
-        x[i] = tag.ns[i]
-      }
-
-      var parent = parser.tags[parser.tags.length - 1] || parser
-      if (parser.opt.xmlns && tag.ns !== parent.ns) {
-        // remove namespace bindings introduced by tag
-        Object.keys(tag.ns).forEach(function (p) {
-          var n = tag.ns[p]
-          emitNode(parser, 'onclosenamespace', { prefix: p, uri: n })
-        })
-      }
-    }
-    if (t === 0) parser.closedRoot = true
-    parser.tagName = parser.attribValue = parser.attribName = ''
-    parser.attribList.length = 0
-    parser.state = S.TEXT
-  }
-
-  function parseEntity (parser) {
-    var entity = parser.entity
-    var entityLC = entity.toLowerCase()
-    var num
-    var numStr = ''
-
-    if (parser.ENTITIES[entity]) {
-      return parser.ENTITIES[entity]
-    }
-    if (parser.ENTITIES[entityLC]) {
-      return parser.ENTITIES[entityLC]
-    }
-    entity = entityLC
-    if (entity.charAt(0) === '#') {
-      if (entity.charAt(1) === 'x') {
-        entity = entity.slice(2)
-        num = parseInt(entity, 16)
-        numStr = num.toString(16)
-      } else {
-        entity = entity.slice(1)
-        num = parseInt(entity, 10)
-        numStr = num.toString(10)
-      }
-    }
-    entity = entity.replace(/^0+/, '')
-    if (isNaN(num) || numStr.toLowerCase() !== entity) {
-      strictFail(parser, 'Invalid character entity')
-      return '&' + parser.entity + ';'
-    }
-
-    return String.fromCodePoint(num)
-  }
-
-  function beginWhiteSpace (parser, c) {
-    if (c === '<') {
-      parser.state = S.OPEN_WAKA
-      parser.startTagPosition = parser.position
-    } else if (!isWhitespace(c)) {
-      // have to process this as a text node.
-      // weird, but happens.
-      strictFail(parser, 'Non-whitespace before first tag.')
-      parser.textNode = c
-      parser.state = S.TEXT
-    }
-  }
-
-  function charAt (chunk, i) {
-    var result = ''
-    if (i < chunk.length) {
-      result = chunk.charAt(i)
-    }
-    return result
-  }
-
-  function write (chunk) {
-    var parser = this
-    if (this.error) {
-      throw this.error
-    }
-    if (parser.closed) {
-      return error(parser,
-        'Cannot write after close. Assign an onready handler.')
-    }
-    if (chunk === null) {
-      return end(parser)
-    }
-    if (typeof chunk === 'object') {
-      chunk = chunk.toString()
-    }
-    var i = 0
-    var c = ''
-    while (true) {
-      c = charAt(chunk, i++)
-      parser.c = c
-
-      if (!c) {
-        break
-      }
-
-      if (parser.trackPosition) {
-        parser.position++
-        if (c === '\n') {
-          parser.line++
-          parser.column = 0
-        } else {
-          parser.column++
-        }
-      }
-
-      switch (parser.state) {
-        case S.BEGIN:
-          parser.state = S.BEGIN_WHITESPACE
-          if (c === '\uFEFF') {
-            continue
-          }
-          beginWhiteSpace(parser, c)
-          continue
-
-        case S.BEGIN_WHITESPACE:
-          beginWhiteSpace(parser, c)
-          continue
-
-        case S.TEXT:
-          if (parser.sawRoot && !parser.closedRoot) {
-            var starti = i - 1
-            while (c && c !== '<' && c !== '&') {
-              c = charAt(chunk, i++)
-              if (c && parser.trackPosition) {
-                parser.position++
-                if (c === '\n') {
-                  parser.line++
-                  parser.column = 0
-                } else {
-                  parser.column++
-                }
-              }
-            }
-            parser.textNode += chunk.substring(starti, i - 1)
-          }
-          if (c === '<' && !(parser.sawRoot && parser.closedRoot && !parser.strict)) {
-            parser.state = S.OPEN_WAKA
-            parser.startTagPosition = parser.position
-          } else {
-            if (!isWhitespace(c) && (!parser.sawRoot || parser.closedRoot)) {
-              strictFail(parser, 'Text data outside of root node.')
-            }
-            if (c === '&') {
-              parser.state = S.TEXT_ENTITY
-            } else {
-              parser.textNode += c
-            }
-          }
-          continue
-
-        case S.SCRIPT:
-          // only non-strict
-          if (c === '<') {
-            parser.state = S.SCRIPT_ENDING
-          } else {
-            parser.script += c
-          }
-          continue
-
-        case S.SCRIPT_ENDING:
-          if (c === '/') {
-            parser.state = S.CLOSE_TAG
-          } else {
-            parser.script += '<' + c
-            parser.state = S.SCRIPT
-          }
-          continue
-
-        case S.OPEN_WAKA:
-          // either a /, ?, !, or text is coming next.
-          if (c === '!') {
-            parser.state = S.SGML_DECL
-            parser.sgmlDecl = ''
-          } else if (isWhitespace(c)) {
-            // wait for it...
-          } else if (isMatch(nameStart, c)) {
-            parser.state = S.OPEN_TAG
-            parser.tagName = c
-          } else if (c === '/') {
-            parser.state = S.CLOSE_TAG
-            parser.tagName = ''
-          } else if (c === '?') {
-            parser.state = S.PROC_INST
-            parser.procInstName = parser.procInstBody = ''
-          } else {
-            strictFail(parser, 'Unencoded <')
-            // if there was some whitespace, then add that in.
-            if (parser.startTagPosition + 1 < parser.position) {
-              var pad = parser.position - parser.startTagPosition
-              c = new Array(pad).join(' ') + c
-            }
-            parser.textNode += '<' + c
-            parser.state = S.TEXT
-          }
-          continue
-
-        case S.SGML_DECL:
-          if ((parser.sgmlDecl + c).toUpperCase() === CDATA) {
-            emitNode(parser, 'onopencdata')
-            parser.state = S.CDATA
-            parser.sgmlDecl = ''
-            parser.cdata = ''
-          } else if (parser.sgmlDecl + c === '--') {
-            parser.state = S.COMMENT
-            parser.comment = ''
-            parser.sgmlDecl = ''
-          } else if ((parser.sgmlDecl + c).toUpperCase() === DOCTYPE) {
-            parser.state = S.DOCTYPE
-            if (parser.doctype || parser.sawRoot) {
-              strictFail(parser,
-                'Inappropriately located doctype declaration')
-            }
-            parser.doctype = ''
-            parser.sgmlDecl = ''
-          } else if (c === '>') {
-            emitNode(parser, 'onsgmldeclaration', parser.sgmlDecl)
-            parser.sgmlDecl = ''
-            parser.state = S.TEXT
-          } else if (isQuote(c)) {
-            parser.state = S.SGML_DECL_QUOTED
-            parser.sgmlDecl += c
-          } else {
-            parser.sgmlDecl += c
-          }
-          continue
-
-        case S.SGML_DECL_QUOTED:
-          if (c === parser.q) {
-            parser.state = S.SGML_DECL
-            parser.q = ''
-          }
-          parser.sgmlDecl += c
-          continue
-
-        case S.DOCTYPE:
-          if (c === '>') {
-            parser.state = S.TEXT
-            emitNode(parser, 'ondoctype', parser.doctype)
-            parser.doctype = true // just remember that we saw it.
-          } else {
-            parser.doctype += c
-            if (c === '[') {
-              parser.state = S.DOCTYPE_DTD
-            } else if (isQuote(c)) {
-              parser.state = S.DOCTYPE_QUOTED
-              parser.q = c
-            }
-          }
-          continue
-
-        case S.DOCTYPE_QUOTED:
-          parser.doctype += c
-          if (c === parser.q) {
-            parser.q = ''
-            parser.state = S.DOCTYPE
-          }
-          continue
-
-        case S.DOCTYPE_DTD:
-          parser.doctype += c
-          if (c === ']') {
-            parser.state = S.DOCTYPE
-          } else if (isQuote(c)) {
-            parser.state = S.DOCTYPE_DTD_QUOTED
-            parser.q = c
-          }
-          continue
-
-        case S.DOCTYPE_DTD_QUOTED:
-          parser.doctype += c
-          if (c === parser.q) {
-            parser.state = S.DOCTYPE_DTD
-            parser.q = ''
-          }
-          continue
-
-        case S.COMMENT:
-          if (c === '-') {
-            parser.state = S.COMMENT_ENDING
-          } else {
-            parser.comment += c
-          }
-          continue
-
-        case S.COMMENT_ENDING:
-          if (c === '-') {
-            parser.state = S.COMMENT_ENDED
-            parser.comment = textopts(parser.opt, parser.comment)
-            if (parser.comment) {
-              emitNode(parser, 'oncomment', parser.comment)
-            }
-            parser.comment = ''
-          } else {
-            parser.comment += '-' + c
-            parser.state = S.COMMENT
-          }
-          continue
-
-        case S.COMMENT_ENDED:
-          if (c !== '>') {
-            strictFail(parser, 'Malformed comment')
-            // allow <!-- blah -- bloo --> in non-strict mode,
-            // which is a comment of " blah -- bloo "
-            parser.comment += '--' + c
-            parser.state = S.COMMENT
-          } else {
-            parser.state = S.TEXT
-          }
-          continue
-
-        case S.CDATA:
-          if (c === ']') {
-            parser.state = S.CDATA_ENDING
-          } else {
-            parser.cdata += c
-          }
-          continue
-
-        case S.CDATA_ENDING:
-          if (c === ']') {
-            parser.state = S.CDATA_ENDING_2
-          } else {
-            parser.cdata += ']' + c
-            parser.state = S.CDATA
-          }
-          continue
-
-        case S.CDATA_ENDING_2:
-          if (c === '>') {
-            if (parser.cdata) {
-              emitNode(parser, 'oncdata', parser.cdata)
-            }
-            emitNode(parser, 'onclosecdata')
-            parser.cdata = ''
-            parser.state = S.TEXT
-          } else if (c === ']') {
-            parser.cdata += ']'
-          } else {
-            parser.cdata += ']]' + c
-            parser.state = S.CDATA
-          }
-          continue
-
-        case S.PROC_INST:
-          if (c === '?') {
-            parser.state = S.PROC_INST_ENDING
-          } else if (isWhitespace(c)) {
-            parser.state = S.PROC_INST_BODY
-          } else {
-            parser.procInstName += c
-          }
-          continue
-
-        case S.PROC_INST_BODY:
-          if (!parser.procInstBody && isWhitespace(c)) {
-            continue
-          } else if (c === '?') {
-            parser.state = S.PROC_INST_ENDING
-          } else {
-            parser.procInstBody += c
-          }
-          continue
-
-        case S.PROC_INST_ENDING:
-          if (c === '>') {
-            emitNode(parser, 'onprocessinginstruction', {
-              name: parser.procInstName,
-              body: parser.procInstBody
-            })
-            parser.procInstName = parser.procInstBody = ''
-            parser.state = S.TEXT
-          } else {
-            parser.procInstBody += '?' + c
-            parser.state = S.PROC_INST_BODY
-          }
-          continue
-
-        case S.OPEN_TAG:
-          if (isMatch(nameBody, c)) {
-            parser.tagName += c
-          } else {
-            newTag(parser)
-            if (c === '>') {
-              openTag(parser)
-            } else if (c === '/') {
-              parser.state = S.OPEN_TAG_SLASH
-            } else {
-              if (!isWhitespace(c)) {
-                strictFail(parser, 'Invalid character in tag name')
-              }
-              parser.state = S.ATTRIB
-            }
-          }
-          continue
-
-        case S.OPEN_TAG_SLASH:
-          if (c === '>') {
-            openTag(parser, true)
-            closeTag(parser)
-          } else {
-            strictFail(parser, 'Forward-slash in opening tag not followed by >')
-            parser.state = S.ATTRIB
-          }
-          continue
-
-        case S.ATTRIB:
-          // haven't read the attribute name yet.
-          if (isWhitespace(c)) {
-            continue
-          } else if (c === '>') {
-            openTag(parser)
-          } else if (c === '/') {
-            parser.state = S.OPEN_TAG_SLASH
-          } else if (isMatch(nameStart, c)) {
-            parser.attribName = c
-            parser.attribValue = ''
-            parser.state = S.ATTRIB_NAME
-          } else {
-            strictFail(parser, 'Invalid attribute name')
-          }
-          continue
-
-        case S.ATTRIB_NAME:
-          if (c === '=') {
-            parser.state = S.ATTRIB_VALUE
-          } else if (c === '>') {
-            strictFail(parser, 'Attribute without value')
-            parser.attribValue = parser.attribName
-            attrib(parser)
-            openTag(parser)
-          } else if (isWhitespace(c)) {
-            parser.state = S.ATTRIB_NAME_SAW_WHITE
-          } else if (isMatch(nameBody, c)) {
-            parser.attribName += c
-          } else {
-            strictFail(parser, 'Invalid attribute name')
-          }
-          continue
-
-        case S.ATTRIB_NAME_SAW_WHITE:
-          if (c === '=') {
-            parser.state = S.ATTRIB_VALUE
-          } else if (isWhitespace(c)) {
-            continue
-          } else {
-            strictFail(parser, 'Attribute without value')
-            parser.tag.attributes[parser.attribName] = ''
-            parser.attribValue = ''
-            emitNode(parser, 'onattribute', {
-              name: parser.attribName,
-              value: ''
-            })
-            parser.attribName = ''
-            if (c === '>') {
-              openTag(parser)
-            } else if (isMatch(nameStart, c)) {
-              parser.attribName = c
-              parser.state = S.ATTRIB_NAME
-            } else {
-              strictFail(parser, 'Invalid attribute name')
-              parser.state = S.ATTRIB
-            }
-          }
-          continue
-
-        case S.ATTRIB_VALUE:
-          if (isWhitespace(c)) {
-            continue
-          } else if (isQuote(c)) {
-            parser.q = c
-            parser.state = S.ATTRIB_VALUE_QUOTED
-          } else {
-            strictFail(parser, 'Unquoted attribute value')
-            parser.state = S.ATTRIB_VALUE_UNQUOTED
-            parser.attribValue = c
-          }
-          continue
-
-        case S.ATTRIB_VALUE_QUOTED:
-          if (c !== parser.q) {
-            if (c === '&') {
-              parser.state = S.ATTRIB_VALUE_ENTITY_Q
-            } else {
-              parser.attribValue += c
-            }
-            continue
-          }
-          attrib(parser)
-          parser.q = ''
-          parser.state = S.ATTRIB_VALUE_CLOSED
-          continue
-
-        case S.ATTRIB_VALUE_CLOSED:
-          if (isWhitespace(c)) {
-            parser.state = S.ATTRIB
-          } else if (c === '>') {
-            openTag(parser)
-          } else if (c === '/') {
-            parser.state = S.OPEN_TAG_SLASH
-          } else if (isMatch(nameStart, c)) {
-            strictFail(parser, 'No whitespace between attributes')
-            parser.attribName = c
-            parser.attribValue = ''
-            parser.state = S.ATTRIB_NAME
-          } else {
-            strictFail(parser, 'Invalid attribute name')
-          }
-          continue
-
-        case S.ATTRIB_VALUE_UNQUOTED:
-          if (!isAttribEnd(c)) {
-            if (c === '&') {
-              parser.state = S.ATTRIB_VALUE_ENTITY_U
-            } else {
-              parser.attribValue += c
-            }
-            continue
-          }
-          attrib(parser)
-          if (c === '>') {
-            openTag(parser)
-          } else {
-            parser.state = S.ATTRIB
-          }
-          continue
-
-        case S.CLOSE_TAG:
-          if (!parser.tagName) {
-            if (isWhitespace(c)) {
-              continue
-            } else if (notMatch(nameStart, c)) {
-              if (parser.script) {
-                parser.script += '</' + c
-                parser.state = S.SCRIPT
-              } else {
-                strictFail(parser, 'Invalid tagname in closing tag.')
-              }
-            } else {
-              parser.tagName = c
-            }
-          } else if (c === '>') {
-            closeTag(parser)
-          } else if (isMatch(nameBody, c)) {
-            parser.tagName += c
-          } else if (parser.script) {
-            parser.script += '</' + parser.tagName
-            parser.tagName = ''
-            parser.state = S.SCRIPT
-          } else {
-            if (!isWhitespace(c)) {
-              strictFail(parser, 'Invalid tagname in closing tag')
-            }
-            parser.state = S.CLOSE_TAG_SAW_WHITE
-          }
-          continue
-
-        case S.CLOSE_TAG_SAW_WHITE:
-          if (isWhitespace(c)) {
-            continue
-          }
-          if (c === '>') {
-            closeTag(parser)
-          } else {
-            strictFail(parser, 'Invalid characters in closing tag')
-          }
-          continue
-
-        case S.TEXT_ENTITY:
-        case S.ATTRIB_VALUE_ENTITY_Q:
-        case S.ATTRIB_VALUE_ENTITY_U:
-          var returnState
-          var buffer
-          switch (parser.state) {
-            case S.TEXT_ENTITY:
-              returnState = S.TEXT
-              buffer = 'textNode'
-              break
-
-            case S.ATTRIB_VALUE_ENTITY_Q:
-              returnState = S.ATTRIB_VALUE_QUOTED
-              buffer = 'attribValue'
-              break
-
-            case S.ATTRIB_VALUE_ENTITY_U:
-              returnState = S.ATTRIB_VALUE_UNQUOTED
-              buffer = 'attribValue'
-              break
-          }
-
-          if (c === ';') {
-            parser[buffer] += parseEntity(parser)
-            parser.entity = ''
-            parser.state = returnState
-          } else if (isMatch(parser.entity.length ? entityBody : entityStart, c)) {
-            parser.entity += c
-          } else {
-            strictFail(parser, 'Invalid character in entity name')
-            parser[buffer] += '&' + parser.entity + c
-            parser.entity = ''
-            parser.state = returnState
-          }
-
-          continue
-
-        default:
-          throw new Error(parser, 'Unknown state: ' + parser.state)
-      }
-    } // while
-
-    if (parser.position >= parser.bufferCheckPosition) {
-      checkBufferLength(parser)
-    }
-    return parser
-  }
-
-  /*! http://mths.be/fromcodepoint v0.1.0 by @mathias */
-  /* istanbul ignore next */
-  if (!String.fromCodePoint) {
-    (function () {
-      var stringFromCharCode = String.fromCharCode
-      var floor = Math.floor
-      var fromCodePoint = function () {
-        var MAX_SIZE = 0x4000
-        var codeUnits = []
-        var highSurrogate
-        var lowSurrogate
-        var index = -1
-        var length = arguments.length
-        if (!length) {
-          return ''
-        }
-        var result = ''
-        while (++index < length) {
-          var codePoint = Number(arguments[index])
-          if (
-            !isFinite(codePoint) || // `NaN`, `+Infinity`, or `-Infinity`
-            codePoint < 0 || // not a valid Unicode code point
-            codePoint > 0x10FFFF || // not a valid Unicode code point
-            floor(codePoint) !== codePoint // not an integer
-          ) {
-            throw RangeError('Invalid code point: ' + codePoint)
-          }
-          if (codePoint <= 0xFFFF) { // BMP code point
-            codeUnits.push(codePoint)
-          } else { // Astral code point; split in surrogate halves
-            // http://mathiasbynens.be/notes/javascript-encoding#surrogate-formulae
-            codePoint -= 0x10000
-            highSurrogate = (codePoint >> 10) + 0xD800
-            lowSurrogate = (codePoint % 0x400) + 0xDC00
-            codeUnits.push(highSurrogate, lowSurrogate)
-          }
-          if (index + 1 === length || codeUnits.length > MAX_SIZE) {
-            result += stringFromCharCode.apply(null, codeUnits)
-            codeUnits.length = 0
-          }
-        }
-        return result
-      }
-      /* istanbul ignore next */
-      if (Object.defineProperty) {
-        Object.defineProperty(String, 'fromCodePoint', {
-          value: fromCodePoint,
-          configurable: true,
-          writable: true
-        })
-      } else {
-        String.fromCodePoint = fromCodePoint
-      }
-    }())
-  }
-})(typeof exports === 'undefined' ? this.sax = {} : exports)
-
-}).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":136,"stream":244,"string_decoder":259}],38:[function(require,module,exports){
-'use strict';
-
-Object.defineProperty(exports, '__esModule', { value: true });
-
-var base = {
-  8: "Backspace",
-  9: "Tab",
-  10: "Enter",
-  12: "NumLock",
-  13: "Enter",
-  16: "Shift",
-  17: "Control",
-  18: "Alt",
-  20: "CapsLock",
-  27: "Escape",
-  32: " ",
-  33: "PageUp",
-  34: "PageDown",
-  35: "End",
-  36: "Home",
-  37: "ArrowLeft",
-  38: "ArrowUp",
-  39: "ArrowRight",
-  40: "ArrowDown",
-  44: "PrintScreen",
-  45: "Insert",
-  46: "Delete",
-  59: ";",
-  61: "=",
-  91: "Meta",
-  92: "Meta",
-  106: "*",
-  107: "+",
-  108: ",",
-  109: "-",
-  110: ".",
-  111: "/",
-  144: "NumLock",
-  145: "ScrollLock",
-  160: "Shift",
-  161: "Shift",
-  162: "Control",
-  163: "Control",
-  164: "Alt",
-  165: "Alt",
-  173: "-",
-  186: ";",
-  187: "=",
-  188: ",",
-  189: "-",
-  190: ".",
-  191: "/",
-  192: "`",
-  219: "[",
-  220: "\\",
-  221: "]",
-  222: "'"
-};
-
-var shift = {
-  48: ")",
-  49: "!",
-  50: "@",
-  51: "#",
-  52: "$",
-  53: "%",
-  54: "^",
-  55: "&",
-  56: "*",
-  57: "(",
-  59: ":",
-  61: "+",
-  173: "_",
-  186: ":",
-  187: "+",
-  188: "<",
-  189: "_",
-  190: ">",
-  191: "?",
-  192: "~",
-  219: "{",
-  220: "|",
-  221: "}",
-  222: "\""
-};
-
-var mac = typeof navigator != "undefined" && /Mac/.test(navigator.platform);
-var ie = typeof navigator != "undefined" && /MSIE \d|Trident\/(?:[7-9]|\d{2,})\..*rv:(\d+)/.exec(navigator.userAgent);
-
-// Fill in the digit keys
-for (var i = 0; i < 10; i++) base[48 + i] = base[96 + i] = String(i);
-
-// The function keys
-for (var i = 1; i <= 24; i++) base[i + 111] = "F" + i;
-
-// And the alphabetic keys
-for (var i = 65; i <= 90; i++) {
-  base[i] = String.fromCharCode(i + 32);
-  shift[i] = String.fromCharCode(i);
-}
-
-// For each code that doesn't have a shift-equivalent, copy the base name
-for (var code in base) if (!shift.hasOwnProperty(code)) shift[code] = base[code];
-
-function keyName(event) {
-  // On macOS, keys held with Shift and Cmd don't reflect the effect of Shift in `.key`.
-  // On IE, shift effect is never included in `.key`.
-  var ignoreKey = mac && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey ||
-      ie && event.shiftKey && event.key && event.key.length == 1 ||
-      event.key == "Unidentified";
-  var name = (!ignoreKey && event.key) ||
-    (event.shiftKey ? shift : base)[event.keyCode] ||
-    event.key || "Unidentified";
-  // Edge sometimes produces wrong names (Issue #3)
-  if (name == "Esc") name = "Escape";
-  if (name == "Del") name = "Delete";
-  // https://developer.microsoft.com/en-us/microsoft-edge/platform/issues/8860571/
-  if (name == "Left") name = "ArrowLeft";
-  if (name == "Up") name = "ArrowUp";
-  if (name == "Right") name = "ArrowRight";
-  if (name == "Down") name = "ArrowDown";
-  return name
-}
-
-exports.base = base;
-exports.keyName = keyName;
-exports.shift = shift;
-
-},{}],39:[function(require,module,exports){
-'use strict';
-
-const {EditorState} = require('@codemirror/state');
-const {highlightActiveLine, keymap, gutter} = require('@codemirror/view');
-const {history, defaultKeymap, historyKeymap} = require('@codemirror/commands');
-const {completionKeymap, autocompletion} = require('@codemirror/autocomplete');
-
-const extMainTheme = require('./ext-main-theme.js');
-const extReadOnlyTogglerWith = require('./ext-read-only-toggler-with.js');
-const extWaveqlLangWith = require('./ext-waveql-lang-with.js');
-const extChangeWith = require('./ext-change-with.js');
-const waveqlCompletionsWith = require('./waveql-completions-with.js');
-const dictionary = require('./dictionary.js');
-
-const createCodeMirrorState = (deso, pstate, extensions) =>
-  EditorState.create({
-    doc: deso.waveql,
-    extensions: [
-      // history(),
-      ...(deso.hasHistory ? [history()] : []),
-      highlightActiveLine(),
-      keymap.of([
-        // no Tabs https://codemirror.net/examples/tab/
-        ...completionKeymap,
-        ...defaultKeymap,
-        ...(deso.hasHistory ? historyKeymap : [])
-      ]),
-      extMainTheme,
-      extWaveqlLangWith(deso.wires, dictionary),
-      autocompletion({override: [waveqlCompletionsWith(deso, pstate)]}),
-      extChangeWith(deso, pstate),
-      extReadOnlyTogglerWith('Alt-/', deso.isRO ? true : false),
-      // extEdiatableTogglerWith('Alt-/', true),
-      gutter({class: 'cm-wd-gutter'}),
-      ...(extensions || [])
-    ]
-  });
-
-module.exports = createCodeMirrorState;
-
-/* eslint-env browser */
-
-},{"./dictionary.js":40,"./ext-change-with.js":41,"./ext-main-theme.js":42,"./ext-read-only-toggler-with.js":43,"./ext-waveql-lang-with.js":44,"./waveql-completions-with.js":52,"@codemirror/autocomplete":54,"@codemirror/commands":55,"@codemirror/state":57,"@codemirror/view":58}],40:[function(require,module,exports){
-'use strict';
-
-const get = require('./get-sig.js');
-const tracePath = require('./trace-path.js');
-
-const dict = [
-
-  {m: '(DIZ', fn: (stream, stt, mat, wires) => {
-    stream.eatSpace();
-    const arg1 = stream.match(/^(\S+)(\s+|$)/);
-    if (arg1) {
-      let rex;
-      try {
-        rex = new RegExp(arg1[1]);
-      } catch (err) {
-        return 'comment';
-      }
-      const rowo = stt.rowo;
-      const clock = stt.labelo.clock;
-      if (clock === undefined) {
-        return 'comment';
-      }
-      rowo.kind = 'DIZ';
-      rowo.clock = stt.labelo.clock;
-
-      const levelo = get(wires, stt.path, false);
-      const othero0 = levelo.body.reduce((res, ero) => {
-        const m = ero.name.match(rex);
-        if (m && m.groups && m.groups.id) {
-          const {id, pc, go} = m.groups;
-          const stage = res[id] = (res[id] || {});
-          const desc = {name: ero.name, ref: ero.link};
-          if (pc) {
-            stage[pc] = desc;
-          } else
-          if (go) {
-            stage[go] = desc;
-          }
-        }
-        return res;
-      }, {});
-      // filter out singles
-      const othero = Object.keys(othero0).reduce((res, name) => {
-        const val = othero0[name];
-        if (val.pc && val.go) {
-          res[name] = val;
-        }
-        return res;
-      }, {});
-      rowo.othero = othero;
-      stt.rStack.push(rowo);
-      return 'macroName';
-    }
-    return 'comment';
-  }},
-
-  {m: '/', fn: (stream, stt) => {
-    stt.path.length = 0;
-    tracePath(stream, stt);
-    return 'punctuation';
-  }},
-
-  {m: '.', fn: (/* stream, stt */) => {
-    return 'punctuation';
-  }},
-
-  {m: '..', fn: (stream, stt) => {
-    stt.path.pop();
-    tracePath(stream, stt);
-    return 'punctuation';
-  }},
-
-  {m: '...', fn: (stream, stt) => {
-    stt.path.pop();
-    stt.path.pop();
-    tracePath(stream, stt);
-    return 'punctuation';
-  }},
-
-  {m: '//', fn: (stream /*, stt */) => {
-    stream.skipToEnd();
-    return 'comment';
-  }},
-
-  {m: ')', fn: (stream, stt) => {
-    const {rStack} = stt;
-    const rTop = rStack.pop();
-    if (rTop) {
-      rTop.len = stt.rowo.idx - rTop.idx + 1;
-      return 'macroName';
-    }
-    return 'comment';
-  }},
-
-  {m: /^@(?<value>\d+)(?<mult>[munpf]*s)(\.(?<style>\w+))?$/, fn: (stream, stt, mat) => {
-    const scale = {
-      's': 0,
-      'ms': -3,
-      'us': -6,
-      'ns': -9,
-      'ps': -12,
-      'fs': -15
-    };
-    const rowo = stt.rowo;
-    rowo.vlines = rowo.vlines || [];
-    rowo.vlines.push({
-      value: Number(mat.groups.value),
-      mult: scale[mat.groups.mult],
-      style: mat.groups.style
-    });
-    return 'unit';
-  }},
-
-  {m: /^%(?<align>[<>^])?(?<plus>[+-])?(?<sign>[su])?(?<radix>[bodhHac])$/, fn: (stream, stt, mat) => {
-    stt.rowo.format = mat.groups;
-    return 'attributeName';
-  }},
-
-  {m: /^:(?<name>\S+)(\s+|$)/, fn: (stream, stt, mat) => {
-    stt.labelo[mat.groups.name] = stt.rowo;
-    return 'labelName';
-  }},
-
-  {m: /^\{(?<body>[^}]+)\}$/, fn: (stream, stt, mat) => {
-    const a = mat.groups.body;
-    const b = a.split(',');
-    const body = b.reduce((res, e) => {
-      const ee = e.split(':');
-      const [key, val] = ee;
-      if (ee.length === 2) {
-        const sig = stt.labelo[val] || Number(val);
-        res[key] = sig;
-      } else
-      if (ee.length === 1) {
-        res[key] = stt.labelo[key] || {};
-      }
-      return res;
-    }, {});
-    stt.rowo.kind = 'brace';
-    stt.rowo.body = body;
-    return 'brace';
-  }}
-
-];
-
-module.exports = dict;
-
-},{"./get-sig.js":46,"./trace-path.js":51}],41:[function(require,module,exports){
-'use strict';
-
-const {EditorView} = require('@codemirror/view');
-
-const langParser = require('./lang-parser.js');
-const waveQlLang = require('./waveql-lang.js');
-const dictionary = require('./dictionary.js');
-
-const extChangeWith = (deso, pstate) => {
-  const updater = deso.updater || (() => {});
-  const lang = waveQlLang(deso.wires, dictionary);
-  return EditorView.updateListener.of((update) => {
-    if (update.docChanged) {
-      const str = update.state.doc.toString();
-      const parser = langParser(lang);
-      const stt = parser(str);
-      deso.view = stt.rows;
-      pstate.numLanes = deso.view.length;
-      pstate.pathTrace = stt.pathTrace;
-      updater(str);
-      deso.render();
-    }
-  });
-};
-
-module.exports = extChangeWith;
-
-},{"./dictionary.js":40,"./lang-parser.js":49,"./waveql-lang.js":53,"@codemirror/view":58}],42:[function(require,module,exports){
-'use strict';
-
-const {EditorView} = require('@codemirror/view');
-
-// https://codemirror.net/examples/styling/
-
-const sidebarStylo = {
-  '&': {
-    color: '#eee',
-    backgroundColor: '#0000001c',
-    // top: '20px',
-    // display: 'block',
-    height: '100%', // codemirror to fill vertical space
-    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
-    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
-    // height: 'calc(100% - 40px)',
-    // left: '0px',
-    // overflow: 'hidden',
-    'scrollbar-width': 'thin',          /* "auto" or "thin" */
-    'scrollbar-color': 'blue orange'    /* scroll thumb and track */   // padding: 0px;
-  },
-  '.cm-gutters': {
-    backgroundColor: '#00000000'
-  },
-  '.cm-wd-gutter': {
-    width: 8
-  },
-  '.cm-editor': {
-    // display: 'block',
-    // height: 'calc(100% - 40px)',
-    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
-    // maxHeight: '100%', // editor grow until it reaches a maximum height, and scroll from that point on
-    // height: '100%', // codemirror to fill vertical space
-    // minHeight: '100%',
-    // maxHeight: '100%'
-  },
-  '.cm-content': {
-    // caretColor: '#3ff',
-    fontFamily: 'Iosevka Drom Web',
-    lineHeight: 1.5,
-    fontSize: '16px',
-    width: '100%'
-    // top: '20px',
-    // bottom: '20px'
-  },
-  '.cm-scroller': {
-    maxHeight: '100%', // editor grow until it reaches a maximum height, and scroll from that point on
-    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
-    // overflowY: 'auto',
-    overflowX: 'hidden'
-  },
-  '.cm-activeLine': {
-    backgroundColor: '#00aaff10'
-  },
-  '.cm-completionIcon-scope-module':  {'&:after': {content: '"M"', 'font-style': 'italic' } },
-  '.cm-completionIcon-scope-class':   {'&:after': {content: '"C"', 'font-style': 'italic' } },
-  '.cm-completionIcon-scope-other':   {'&:after': {content: '"O"', 'font-style': 'italic' } },
-
-  '.cm-completionIcon-var-parameter': {'&:after': {content: '"p"'} },
-  '.cm-completionIcon-var-reg':       {'&:after': {content: '"r"'} },
-  '.cm-completionIcon-var-wire':      {'&:after': {content: '"w"'} },
-  '.cm-completionIcon-var-other':     {'&:after': {content: '"o"'} }
-};
-
-const extMainTheme = EditorView.theme(sidebarStylo, {dark: true});
-
-module.exports = extMainTheme;
-
-},{"@codemirror/view":58}],43:[function(require,module,exports){
-'use strict';
-
-const {EditorState, Compartment} = require('@codemirror/state');
-const {keymap, EditorView} = require('@codemirror/view');
-
-// https://codemirror.net/docs/ref/#state.EditorState.readOnly
-// https://codemirror.net/examples/config/#dynamic-configuration
-
-const roFlag = new Compartment;
-const roStyle = new Compartment;
-
-const rw = EditorView.contentAttributes.of({
-  style: 'caret-color: #11ffbb'
-});
-
-const ro = EditorView.contentAttributes.of({
-  style: 'caret-color: #ff5500'
-});
-
-const toggleEditability = (eView) => {
-  const r = eView.state.readOnly;
-  eView.dispatch({
-    effects: [
-      roFlag.reconfigure(EditorState.readOnly.of(!r)),
-      roStyle.reconfigure(r ? rw : ro)
-    ]
-  });
-};
-
-const extReadOnlyTogglerWith = (key, initialValue) => [
-  roFlag.of(EditorState.readOnly.of(initialValue)),
-  roStyle.of(initialValue ? ro : rw),
-  keymap.of([{key, run: toggleEditability, preventDefault: true}])
-];
-
-module.exports = extReadOnlyTogglerWith;
-
-},{"@codemirror/state":57,"@codemirror/view":58}],44:[function(require,module,exports){
-'use strict';
-
-const {StreamLanguage, syntaxHighlighting, HighlightStyle} = require('@codemirror/language');
-const {tags} = require('@lezer/highlight');
-const waveQlLang = require('./waveql-lang.js');
-
-// waveql syntax
-// https://codemirror.net/docs/ref/#language.StreamLanguage
-
-// https://github.com/lezer-parser/highlight/blob/main/src/highlight.ts
-
-const sidebarHighlightStyleGen = t => [
-
-  // $var
-  {tag: [t.variableName],   background: '#000', color: 'hsl(50,  100%, 25%)'},
-  {tag: [t.macroName],      background: '#000', color: 'hsl(200, 100%, 30%)'},
-  {tag: [t.bool],           background: '#000', color: 'hsl(60,  100%, 70%)'},
-  {tag: [t.atom],           background: '#000', color: 'hsl(30,  100%, 70%)'},
-
-  // $scope
-  {tag: [t.namespace],      background: '#000', color: 'hsl(302, 100%, 25%)', fontStyle: 'italic'},
-  {tag: [t.meta],           background: '#000', color: 'hsl(120, 100%, 80%)', fontStyle: 'italic'},
-  {tag: [t.className],      background: '#000', color: 'hsl(322, 100%, 36%)', fontStyle: 'italic'},
-
-  {tag: [t.punctuation],    background: '#000'},
-  {tag: [t.labelName],      background: '#000', color: 'hsl(175, 100%, 86%)', fontWeight: 'bold'},
-  {tag: [t.attributeName],  background: '#000', color: 'hsl(202, 100%, 66%)', fontWeight: 'bold'},
-  {tag: [t.brace],          background: '#000', color: 'hsl(278, 100%, 79%)', fontWeight: 'bold'},
-  {tag: [t.unit],           background: '#000', color: 'hsl(333, 100%, 80%)'},
-  {tag: [t.comment],        background: '#000', color: 'hsl(0, 0%, 50%)'}
-];
-
-// textDecoration: 'underline',
-// textUnderlinePosition: 'under'
-// textDecoration: 'line-through'
-
-const extWaveqlLangWith = (wires, dict) => {
-  return [
-    StreamLanguage.define(waveQlLang(wires, dict)),
-    syntaxHighlighting(HighlightStyle.define(sidebarHighlightStyleGen(tags)))
-  ];
-};
-
-module.exports = extWaveqlLangWith;
-
-},{"./waveql-lang.js":53,"@codemirror/language":56,"@lezer/highlight":60}],45:[function(require,module,exports){
-'use strict';
-
-const getScopeType = (key) => {
-  const lut = {
-    module:     {id: 0,   tag: 'meta', icon: 'module', term: 'scopeModule'}
-    // task:       {id: 1,   tag: 'namespace'},
-    // function:   {id: 2,   tag: 'namespace'},
-    // begin:      {id: 3,   tag: 'namespace'},
-    // fork:       {id: 4,   tag: 'namespace'},
-    // extra scopes from Verilator
-    // generate:   {id: 5,   tag: 'namespace'},
-    // struct:     {id: 6,   tag: 'namespace'},
-    // union:      {id: 7,   tag: 'namespace'},
-    // class:      {id: 8,   tag: 'className', icon: 'class'}
-    // interface:  {id: 9,   tag: 'namespace'},
-    // package:    {id: 10,  tag: 'namespace'},
-    // program:    {id: 11,  tag: 'namespace'}
-  };
-  return lut[key] || {tag: 'namespace', icon: 'other', term: 'scopeOther'};
-};
-
-module.exports = getScopeType;
-
-},{}],46:[function(require,module,exports){
-'use strict';
-
-const get = (wires, pat) => {
-  for (let i = 0; i < pat.length; i++) {
-    const ero = wires.body.find(e => e.name === pat[i]);
-    if (ero === undefined) {
-      return false;
-    }
-    wires = ero;
-  }
-  return wires;
-};
-
-module.exports = get;
-
-},{}],47:[function(require,module,exports){
-'use strict';
-
-const getVarType = (key) => {
-  const lut = {
-    // event:      {id: 1,   tag: 'variableName'},
-    // integer:    {id: 2,   tag: 'variableName'},
-    parameter:  {id: 3,   tag: 'macroName', icon: 'parameter'},
-    // real:       {id: 4,   tag: 'variableName'},
-    // realtime:   {id: 5,   tag: 'variableName'},
-    reg:        {id: 6,   tag: 'atom', icon: 'reg', term: 'varReg'},
-    // supply0:    {id: 7,   tag: 'variableName'},
-    // supply1:    {id: 8,   tag: 'variableName'},
-    // time:       {id: 9,   tag: 'variableName'},
-    // tri:        {id: 10,  tag: 'variableName'},
-    // triand:     {id: 11,  tag: 'variableName'},
-    // trior:      {id: 12,  tag: 'variableName'},
-    // trireg:     {id: 13,  tag: 'variableName'},
-    // tri0:       {id: 14,  tag: 'variableName'},
-    // tri1:       {id: 15,  tag: 'variableName'},
-    // wand:       {id: 16,  tag: 'variableName'},
-    wire:       {id: 17,  tag: 'bool', icon: 'wire', term: 'varWire'}
-    // wor:        {id: 18,  tag: 'variableName'}
-  };
-  return lut[key] || {tag: 'variableName', icon: 'other', term: 'varOther'};
-};
-
-module.exports = getVarType;
-
-},{}],48:[function(require,module,exports){
-'use strict';
+const {StyleModule} = require('style-mod');
+
+const {
+  createCodeMirrorState,
+  mountCodeMirror6
+} = require('waveql');
+
+const createVCD = require('vcd-stream/out/vcd.js');
+const webVcdParser = require('vcd-stream/lib/web-vcd-parser.js');
+const vcdPipeDeso = require('vcd-stream/lib/vcd-pipe-deso.js');
+const getVcd = require('vcd-stream/lib/get-vcd.js');
+
+const {
+  domContainer,
+  pluginRenderValues,
+  pluginRenderTimeGrid,
+  keyBindo,
+  mountTree,
+  getElement,
+  getListing,
+  // // renderMenu,
+  // // mountCodeMirror5,
+  genKeyHandler,
+  genOnWheel,
+  themeAll,
+  // helpPanel
+} = require('@wavedrom/doppler');
 
 const pkg = require('../package.json');
-const langParser = require('./lang-parser.js');
-const waveQlLang = require('./waveql-lang.js');
-const mountCodeMirror6 = require('./mount-codemirror6.js');
-const createCodeMirrorState = require('./create-code-mirror-state.js');
 
-exports.version = pkg.version;
-exports.langParser = langParser;
-exports.waveQlLang = waveQlLang;
-exports.mountCodeMirror6 = mountCodeMirror6;
-exports.createCodeMirrorState = createCodeMirrorState;
-
-},{"../package.json":63,"./create-code-mirror-state.js":39,"./lang-parser.js":49,"./mount-codemirror6.js":50,"./waveql-lang.js":53}],49:[function(require,module,exports){
-'use strict';
-
-const defineStream = (string, rowOffset) => {
-  const stream = {string, rowOffset, pos: 0};
-
-  stream.match = (regx, consume) => {
-    const sub = stream.string.slice(stream.pos);
-    const m = sub.match(regx);
-    if (m && ((consume === undefined) || (consume === true))) {
-      stream.pos += m[0].length;
-    }
-    return m;
-  };
-
-  stream.skipToEnd = () => {
-    stream.pos = stream.string.length;
-  };
-
-  stream.eatSpace = () => {
-    const sub = stream.string.slice(stream.pos);
-    const m = sub.match(/^\s+/);
-    if (m) {
-      stream.pos += m[0].length;
-      return true;
-    }
-  };
-
-  return stream;
-};
-
-const langParser = (lang) => {
-  const stt = lang.startState();
-  return (string) => {
-    // stream.string = string;
-    let rowOffset = 0;
-    const rows = string.split(/\n/);
-    for (const row of rows) {
-      if (row === '') {
-        lang.blankLine(stt);
-      } else {
-        const stream = defineStream(row, rowOffset);
-        while (stream.pos < stream.string.length) {
-          lang.token(stream, stt);
-        }
-        rowOffset += row.length;
+const loadVCD = async (mod, cnt, initDeso, data, done) => {
+  const inst = await webVcdParser(mod); // VCD parser instance
+  vcdPipeDeso(initDeso, inst, (deso) => {
+    cnt.start(deso);
+    deso.render();
+    console.log('vcdPipeDeso done');
+  });
+  const reader = {
+    ext: 'vcd',
+    baseName: data.name,
+    reader: {
+      read: async () => {
+        return {done: true, value: data.text};
       }
-      rowOffset += 1;
     }
-    return stt;
   };
+  await getVcd([reader], {
+    set innerHTML (msg) {
+      console.log(msg);
+    }
+  }, inst);
+  done();
 };
 
-module.exports = langParser;
-
-},{}],50:[function(require,module,exports){
-'use strict';
-
-const {EditorView} = require('@codemirror/view');
-
-const mountCodeMirror6 = (sidebarState, sidebar, deso, pstate) => {
-  const view = new EditorView({state: sidebarState, parent: sidebar});
-
-  view.scrollDOM.addEventListener('scroll', () => {
-    const rect = view.contentDOM.getBoundingClientRect();
-    pstate.yOffset = pstate.topBarHeight - rect.top;
-    deso.render();
-  });
-
-  document.addEventListener('scroll', () => {
-    const rect = view.contentDOM.getBoundingClientRect();
-    pstate.yOffset = pstate.topBarHeight - rect.top;
-    deso.render();
-  });
-
-  // dummy change to trigger docChanged event
-  // view.dispatch({changes: {from: 0, insert: ' '}});
-  // view.dispatch({changes: {from: 0, to: 1, insert: ''}});
-
-  return {
-    getScrollInfo: () => {
-      const rect = view.contentDOM.getBoundingClientRect();
-      return {
-        top: rect.top,
-        clientHeight: rect.height
-      };
-    },
-    scrollTo: (/*a, y*/) => {
-    },
-    view,
-    hasFocus: () => view.hasFocus // cm.hasFocus()
+const loadLST = async (deso, data, done) => {
+  const reader = {
+    ext: 'lst',
+    baseName: data.name,
+    reader: {
+      read: async () => {
+        return {done: true, value: data.text};
+      }
+    }
   };
-
+  console.log('loadLST reader', reader, data);
+  deso.listing = await getListing([reader]);
+  done();
 };
 
-module.exports = mountCodeMirror6;
+global.VCDromView = async (divName) => {
+  console.log(pkg.name, pkg.version);
+  const rootDiv = getElement(divName);
+
+  const vscode = acquireVsCodeApi();
+
+  // add all CSS styles
+  StyleModule.mount(document, new StyleModule(Object.assign(themeAll, {
+    '.vcdrombody': themeAll.body,
+  })));
+
+  const cnt1 = domContainer({
+    elemento: mountTree.defaultElemento,
+    layers: mountTree.defaultLayers,
+    renderPlugins: [
+      pluginRenderTimeGrid,
+      pluginRenderValues
+    ]
+  });
+
+  // const elo = mountTree.createElemento(mountTree.defaultElemento);
+  // const container = mountTree.createContainer(elo, mountTree.defaultLayers);
+  rootDiv.innerHTML = '';
+  rootDiv.appendChild(cnt1.pstate.container);
+
+  const updater = (str) => {
+    console.log('updater');
+    deso.waveql = str;
+    vscode.postMessage({
+      kind: 'waveql.update',
+      text: str
+    });
+  };
+
+  const deso = {
+    wires: {body: []},
+    listing: [],
+    render: () => { console.log('dummy render'); },
+    updater
+  };
+
+
+  const cmState = createCodeMirrorState(
+    deso,
+    cnt1.pstate
+  );
+
+  const cm = mountCodeMirror6(
+    cmState,
+    cnt1.elo.waveqlPanel,
+    deso,
+    cnt1.pstate
+  );
+  cnt1.elo.container.addEventListener('keydown', genKeyHandler.genKeyHandler(rootDiv, cnt1.pstate, deso, cm, keyBindo));
+  cnt1.elo.container.addEventListener('wheel', genOnWheel(rootDiv, cnt1.pstate, deso, cm, keyBindo));
+  cm.view.focus();
+
+  const mod = await createVCD();
+  // const vd = await mountWaves(mod, deso, elo, pstate, renderHandler);
+
+  window.addEventListener('message', event => {
+    const {data} = event;
+    switch (data.kind) {
+    case 'loadWaveQL':
+      if (data.text !== deso.waveql) {
+        console.log('loadWaveQL');
+        deso.waveql = data.text;
+        // cnt1.pstate.waveql = data.text;
+        cm.view.dispatch({changes: {
+          from: 0, to: cm.view.state.doc.length, insert: data.text
+        }});
+      }
+      break;
+    case 'loadVCD':
+      loadVCD(mod, cnt1, deso, data, () => {
+        cm.view.dispatch({changes: {
+          from: 0, to: cm.view.state.doc.length, insert: deso.waveql
+        }});
+        // cm.view.dispatch({changes: {from: 0, insert: ' '}});
+        // cm.view.dispatch({changes: {from: 0, to: 1, insert: ''}});
+        // cm.view.setState(createCodeMirrorState(
+        //   deso,
+        //   cnt1.pstate
+        // ));
+        // vscode.postMessage({
+        //   kind: 'loaded'
+        // });
+        console.log('loadVCD done', deso);
+      });
+      break;
+    case 'loadLST':
+      loadLST(deso, data, () => {
+        cm.view.dispatch({changes: {
+          from: 0, to: cm.view.state.doc.length, insert: deso.waveql
+        }});
+        console.log('loadLST done', deso);
+      });
+      break;
+    default:
+      console.log('-> Client', event);
+    }
+  });
+
+  vscode.postMessage({
+    kind: 'loaded'
+  });
+
+  // console.log('webVcdParser', inst);
+
+};
 
 /* eslint-env browser */
+/* global acquireVsCodeApi */
 
-},{"@codemirror/view":58}],51:[function(require,module,exports){
-'use strict';
-
-const tracePath = (stream, stt) => {
-  if (stream.rowOffset != undefined) {
-    const offset = stream.rowOffset + stream.pos;
-    stt.pathTrace.push([offset, stt.path]);
-  }
-};
-
-module.exports = tracePath;
-
-
-},{}],52:[function(require,module,exports){
-'use strict';
-
-const getSig = require('./get-sig.js');
-const getScopeType = require('./get-scope-type.js');
-const getVarType = require('./get-var-type.js');
-
-const findPath = (pos, pathTrace) => {
-  let path = [];
-  for (const item of pathTrace) {
-    if (item[0] > pos) {
-      break;
-    }
-    path = item[1];
-  }
-  return path;
-};
-
-// signal autocomplete
-// https://codemirror.net/examples/autocompletion/
-
-const waveqlCompletionsWith = (deso, pstate) => {
-  // const {wires} = deso;
-  return (context /* : CompletionContext */) => {
-    const word = context.matchBefore(/[\w_.()[\]]+/);
-    if (!word || word.from == word.to && !context.explicit) {
-      return null;
-    }
-
-    const path = findPath(word.from, pstate.pathTrace);
-    const scope = getSig(deso.wires, path);
-
-    const options = (scope.body || []).map(ero => {
-      const type = (
-        (ero.kind === 'var') ? ero.kind + '-' + getVarType(ero.type).icon :
-          (ero.kind === 'scope') ? ero.kind + '-' + getScopeType(ero.type).icon :
-            undefined
-      );
-      return {label: ero.name, type};
-    });
-    return {
-      from: word.from,
-      options
-    };
-  };
-};
-
-module.exports = waveqlCompletionsWith;
-
-},{"./get-scope-type.js":45,"./get-sig.js":46,"./get-var-type.js":47}],53:[function(require,module,exports){
-'use strict';
-
-const get = require('./get-sig.js');
-const getScopeType = require('./get-scope-type.js');
-const getVarType = require('./get-var-type.js');
-const tracePath = require('./trace-path.js');
-
-const findSignalWith = (wires) => (stream, stt, word) => {
-  const newPath = stt.path.concat(word);
-  const ero = get(wires, newPath, false);
-  if (ero) {
-    if (ero.kind === 'scope') {
-      stt.path = newPath;
-      tracePath(stream, stt);
-      return (getScopeType(ero.type)).tag;
-    }
-    if (ero.kind === 'var') {
-      // stt.varWidth = ero.size;
-      const rowo = stt.rowo;
-      rowo.width = ero.size;
-      rowo.name = ero.name;
-      rowo.ref = ero.link;
-      return (getVarType(ero.type)).tag;
-    }
-  }
-};
-
-const findInDictionary = (wires) => (stream, stt, word) => {
-  const dict = stt.dict;
-  for (const item of dict) {
-    const m = item.m;
-    if (typeof m === 'string') {
-      if (word === m) {
-        return item.fn(stream, stt, m, wires);
-      }
-    } else {
-      const mat = word.match(m);
-      if (mat) {
-        return item.fn(stream, stt, mat, wires);
-      }
-    }
-  }
-};
-
-const waveQlLang = (wires, dict) => {
-  const finders = [
-    findSignalWith(wires), // instance / signal tree
-    findInDictionary(wires), // direct or regex word match
-    () => 'comment'
-  ];
-  return {
-    startState: function() {
-      return {path: [], dict, rows: [], labelo: {}, rStack: [], pathTrace: []};
-    },
-    blankLine: function (stt) {
-      stt.rows.push({});
-    },
-    token: function (stream, stt) {
-      if (stream.eatSpace()) {
-        return null;
-      }
-      const mat = stream.match(/^(\S+)(\s+|$)/);
-      if (mat) {
-        const word = mat[1];
-        if (stt.curStream !== stream) {
-          stt.curStream = stream;
-          const rowo = stt.rowo = {
-            // raw: stream.string,
-            idx: stt.rows.length
-          };
-          stt.rows.push(rowo);
-        }
-        for (const finder of finders) {
-          const res = finder(stream, stt, word);
-          if (res) {
-            return res;
-          }
-        }
-      } else {
-        throw new Error(stream);
-      }
-    },
-    languageData: {
-      // commentTokens: {line: '//'}
-    }
-  };
-};
-
-module.exports = waveQlLang;
-
-},{"./get-scope-type.js":45,"./get-sig.js":46,"./get-var-type.js":47,"./trace-path.js":51}],54:[function(require,module,exports){
+}).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"../package.json":260,"@wavedrom/doppler":22,"style-mod":235,"vcd-stream/lib/get-vcd.js":238,"vcd-stream/lib/vcd-pipe-deso.js":240,"vcd-stream/lib/web-vcd-parser.js":241,"vcd-stream/out/vcd.js":242,"waveql":253}],2:[function(require,module,exports){
 'use strict';
 
 var state = require('@codemirror/state');
@@ -6699,7 +2198,7 @@ exports.snippetCompletion = snippetCompletion;
 exports.snippetKeymap = snippetKeymap;
 exports.startCompletion = startCompletion;
 
-},{"@codemirror/language":56,"@codemirror/state":57,"@codemirror/view":58}],55:[function(require,module,exports){
+},{"@codemirror/language":4,"@codemirror/state":5,"@codemirror/view":6}],3:[function(require,module,exports){
 'use strict';
 
 var state = require('@codemirror/state');
@@ -8427,7 +3926,7 @@ exports.undo = undo;
 exports.undoDepth = undoDepth;
 exports.undoSelection = undoSelection;
 
-},{"@codemirror/language":56,"@codemirror/state":57,"@codemirror/view":58,"@lezer/common":59}],56:[function(require,module,exports){
+},{"@codemirror/language":4,"@codemirror/state":5,"@codemirror/view":6,"@lezer/common":7}],4:[function(require,module,exports){
 'use strict';
 
 var common = require('@lezer/common');
@@ -11127,7 +6626,7 @@ exports.unfoldAll = unfoldAll;
 exports.unfoldCode = unfoldCode;
 exports.unfoldEffect = unfoldEffect;
 
-},{"@codemirror/state":57,"@codemirror/view":58,"@lezer/common":59,"@lezer/highlight":60,"style-mod":61}],57:[function(require,module,exports){
+},{"@codemirror/state":5,"@codemirror/view":6,"@lezer/common":7,"@lezer/highlight":8,"style-mod":235}],5:[function(require,module,exports){
 'use strict';
 
 /**
@@ -15086,7 +10585,7 @@ exports.findClusterBreak = findClusterBreak;
 exports.findColumn = findColumn;
 exports.fromCodePoint = fromCodePoint;
 
-},{}],58:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 'use strict';
 
 var state = require('@codemirror/state');
@@ -24268,9 +19767,10 @@ function crosshairCursor(options = {}) {
 
 const Outside = "-10000px";
 class TooltipViewManager {
-    constructor(view, facet, createTooltipView) {
+    constructor(view, facet, createTooltipView, removeTooltipView) {
         this.facet = facet;
         this.createTooltipView = createTooltipView;
+        this.removeTooltipView = removeTooltipView;
         this.input = view.state.facet(facet);
         this.tooltips = this.input.filter(t => t);
         this.tooltipViews = this.tooltips.map(createTooltipView);
@@ -24310,7 +19810,7 @@ class TooltipViewManager {
         }
         for (let t of this.tooltipViews)
             if (tooltipViews.indexOf(t) < 0) {
-                t.dom.remove();
+                this.removeTooltipView(t);
                 (_a = t.destroy) === null || _a === void 0 ? void 0 : _a.call(t);
             }
         if (above) {
@@ -24358,7 +19858,13 @@ const tooltipPlugin = ViewPlugin.fromClass(class {
         this.classes = view.themeClasses;
         this.createContainer();
         this.measureReq = { read: this.readMeasure.bind(this), write: this.writeMeasure.bind(this), key: this };
-        this.manager = new TooltipViewManager(view, showTooltip, t => this.createTooltip(t));
+        this.resizeObserver = typeof ResizeObserver == "function" ? new ResizeObserver(() => this.measureSoon()) : null;
+        this.manager = new TooltipViewManager(view, showTooltip, t => this.createTooltip(t), t => {
+            if (this.resizeObserver)
+                this.resizeObserver.unobserve(t.dom);
+            t.dom.remove();
+        });
+        this.above = this.manager.tooltips.map(t => !!t.above);
         this.intersectionObserver = typeof IntersectionObserver == "function" ? new IntersectionObserver(entries => {
             if (Date.now() > this.lastTransaction - 50 &&
                 entries.length > 0 && entries[entries.length - 1].intersectionRatio < 1)
@@ -24436,10 +19942,12 @@ const tooltipPlugin = ViewPlugin.fromClass(class {
         this.container.appendChild(tooltipView.dom);
         if (tooltipView.mount)
             tooltipView.mount(this.view);
+        if (this.resizeObserver)
+            this.resizeObserver.observe(tooltipView.dom);
         return tooltipView;
     }
     destroy() {
-        var _a, _b;
+        var _a, _b, _c;
         this.view.win.removeEventListener("resize", this.measureSoon);
         for (let tooltipView of this.manager.tooltipViews) {
             tooltipView.dom.remove();
@@ -24447,7 +19955,8 @@ const tooltipPlugin = ViewPlugin.fromClass(class {
         }
         if (this.parent)
             this.container.remove();
-        (_b = this.intersectionObserver) === null || _b === void 0 ? void 0 : _b.disconnect();
+        (_b = this.resizeObserver) === null || _b === void 0 ? void 0 : _b.disconnect();
+        (_c = this.intersectionObserver) === null || _c === void 0 ? void 0 : _c.disconnect();
         clearTimeout(this.measureTimeout);
     }
     readMeasure() {
@@ -24661,7 +20170,7 @@ class HoverTooltipHost {
         this.mounted = false;
         this.dom = document.createElement("div");
         this.dom.classList.add("cm-tooltip-hover");
-        this.manager = new TooltipViewManager(view, showHoverTooltip, t => this.createHostedView(t));
+        this.manager = new TooltipViewManager(view, showHoverTooltip, t => this.createHostedView(t), t => t.dom.remove());
     }
     createHostedView(tooltip) {
         let hostedView = tooltip.create(this.view);
@@ -25680,7 +21189,7 @@ exports.showPanel = showPanel;
 exports.showTooltip = showTooltip;
 exports.tooltips = tooltips;
 
-},{"@codemirror/state":57,"style-mod":61,"w3c-keyname":62}],59:[function(require,module,exports){
+},{"@codemirror/state":5,"style-mod":235,"w3c-keyname":243}],7:[function(require,module,exports){
 'use strict';
 
 /**
@@ -27858,7 +23367,7 @@ exports.TreeCursor = TreeCursor;
 exports.TreeFragment = TreeFragment;
 exports.parseMixed = parseMixed;
 
-},{}],60:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 'use strict';
 
 var common = require('@lezer/common');
@@ -28759,1124 +24268,1943 @@ exports.styleTags = styleTags;
 exports.tagHighlighter = tagHighlighter;
 exports.tags = tags;
 
-},{"@lezer/common":59}],61:[function(require,module,exports){
-var C = "\u037c"
-var COUNT = typeof Symbol == "undefined" ? "__" + C : Symbol.for(C)
-var SET = typeof Symbol == "undefined" ? "__styleSet" + Math.floor(Math.random() * 1e8) : Symbol("styleSet")
-var top = typeof globalThis != "undefined" ? globalThis : typeof window != "undefined" ? window : {}
-
-// :: - Style modules encapsulate a set of CSS rules defined from
-// JavaScript. Their definitions are only available in a given DOM
-// root after it has been _mounted_ there with `StyleModule.mount`.
-//
-// Style modules should be created once and stored somewhere, as
-// opposed to re-creating them every time you need them. The amount of
-// CSS rules generated for a given DOM root is bounded by the amount
-// of style modules that were used. So to avoid leaking rules, don't
-// create these dynamically, but treat them as one-time allocations.
-var StyleModule = exports.StyleModule = function StyleModule(spec, options) {
-  this.rules = []
-  var ref = options || {};
-  var finish = ref.finish;
-
-  function splitSelector(selector) {
-    return /^@/.test(selector) ? [selector] : selector.split(/,\s*/)
-  }
-
-  function render(selectors, spec, target, isKeyframes) {
-    var local = [], isAt = /^@(\w+)\b/.exec(selectors[0]), keyframes = isAt && isAt[1] == "keyframes"
-    if (isAt && spec == null) { return target.push(selectors[0] + ";") }
-    for (var prop in spec) {
-      var value = spec[prop]
-      if (/&/.test(prop)) {
-        render(prop.split(/,\s*/).map(function (part) { return selectors.map(function (sel) { return part.replace(/&/, sel); }); }).reduce(function (a, b) { return a.concat(b); }),
-               value, target)
-      } else if (value && typeof value == "object") {
-        if (!isAt) { throw new RangeError("The value of a property (" + prop + ") should be a primitive value.") }
-        render(splitSelector(prop), value, local, keyframes)
-      } else if (value != null) {
-        local.push(prop.replace(/_.*/, "").replace(/[A-Z]/g, function (l) { return "-" + l.toLowerCase(); }) + ": " + value + ";")
-      }
-    }
-    if (local.length || keyframes) {
-      target.push((finish && !isAt && !isKeyframes ? selectors.map(finish) : selectors).join(", ") +
-                  " {" + local.join(" ") + "}")
-    }
-  }
-
-  for (var prop in spec) { render(splitSelector(prop), spec[prop], this.rules) }
-};
-
-// :: () → string
-// Returns a string containing the module's CSS rules.
-StyleModule.prototype.getRules = function getRules () { return this.rules.join("\n") };
-
-// :: () → string
-// Generate a new unique CSS class name.
-StyleModule.newName = function newName () {
-  var id = top[COUNT] || 1
-  top[COUNT] = id + 1
-  return C + id.toString(36)
-};
-
-// :: (union<Document, ShadowRoot>, union<[StyleModule], StyleModule>, ?{nonce: ?string})
-//
-// Mount the given set of modules in the given DOM root, which ensures
-// that the CSS rules defined by the module are available in that
-// context.
-//
-// Rules are only added to the document once per root.
-//
-// Rule order will follow the order of the modules, so that rules from
-// modules later in the array take precedence of those from earlier
-// modules. If you call this function multiple times for the same root
-// in a way that changes the order of already mounted modules, the old
-// order will be changed.
-//
-// If a Content Security Policy nonce is provided, it is added to
-// the `<style>` tag generated by the library.
-StyleModule.mount = function mount (root, modules, options) {
-  var set = root[SET], nonce = options && options.nonce
-  if (!set) { set = new StyleSet(root, nonce) }
-  else if (nonce) { set.setNonce(nonce) }
-  set.mount(Array.isArray(modules) ? modules : [modules])
-};
-
-var adoptedSet = new Map //<Document, StyleSet>
-
-var StyleSet = function StyleSet(root, nonce) {
-  var doc = root.ownerDocument || root, win = doc.defaultView
-  if (!root.head && root.adoptedStyleSheets && win.CSSStyleSheet) {
-    var adopted = adoptedSet.get(doc)
-    if (adopted) {
-      root.adoptedStyleSheets = [adopted.sheet ].concat( root.adoptedStyleSheets)
-      return root[SET] = adopted
-    }
-    this.sheet = new win.CSSStyleSheet
-    root.adoptedStyleSheets = [this.sheet ].concat( root.adoptedStyleSheets)
-    adoptedSet.set(doc, this)
-  } else {
-    this.styleTag = doc.createElement("style")
-    if (nonce) { this.styleTag.setAttribute("nonce", nonce) }
-    var target = root.head || root
-    target.insertBefore(this.styleTag, target.firstChild)
-  }
-  this.modules = []
-  root[SET] = this
-};
-
-StyleSet.prototype.mount = function mount (modules) {
-  var sheet = this.sheet
-  var pos = 0 /* Current rule offset */, j = 0 /* Index into this.modules */
-  for (var i = 0; i < modules.length; i++) {
-    var mod = modules[i], index = this.modules.indexOf(mod)
-    if (index < j && index > -1) { // Ordering conflict
-      this.modules.splice(index, 1)
-      j--
-      index = -1
-    }
-    if (index == -1) {
-      this.modules.splice(j++, 0, mod)
-      if (sheet) { for (var k = 0; k < mod.rules.length; k++)
-        { sheet.insertRule(mod.rules[k], pos++) } }
-    } else {
-      while (j < index) { pos += this.modules[j++].rules.length }
-      pos += mod.rules.length
-      j++
-    }
-  }
-
-  if (!sheet) {
-    var text = ""
-    for (var i$1 = 0; i$1 < this.modules.length; i$1++)
-      { text += this.modules[i$1].getRules() + "\n" }
-    this.styleTag.textContent = text
-  }
-};
-
-StyleSet.prototype.setNonce = function setNonce (nonce) {
-  if (this.styleTag && this.styleTag.getAttribute("nonce") != nonce)
-    { this.styleTag.setAttribute("nonce", nonce) }
-};
-
-// Style::Object<union<Style,string>>
-//
-// A style is an object that, in the simple case, maps CSS property
-// names to strings holding their values, as in `{color: "red",
-// fontWeight: "bold"}`. The property names can be given in
-// camel-case—the library will insert a dash before capital letters
-// when converting them to CSS.
-//
-// If you include an underscore in a property name, it and everything
-// after it will be removed from the output, which can be useful when
-// providing a property multiple times, for browser compatibility
-// reasons.
-//
-// A property in a style object can also be a sub-selector, which
-// extends the current context to add a pseudo-selector or a child
-// selector. Such a property should contain a `&` character, which
-// will be replaced by the current selector. For example `{"&:before":
-// {content: '"hi"'}}`. Sub-selectors and regular properties can
-// freely be mixed in a given object. Any property containing a `&` is
-// assumed to be a sub-selector.
-//
-// Finally, a property can specify an @-block to be wrapped around the
-// styles defined inside the object that's the property's value. For
-// example to create a media query you can do `{"@media screen and
-// (min-width: 400px)": {...}}`.
-
-
-},{}],62:[function(require,module,exports){
-arguments[4][38][0].apply(exports,arguments)
-},{"dup":38}],63:[function(require,module,exports){
-module.exports={
-  "name": "waveql",
-  "version": "1.7.0",
-  "description": "Waveform Query Language",
-  "homepage": "https://github.com/wavedrom/ql#readme",
-  "author": "Aliaksei Chapyzhenka",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/wavedrom/ql.git"
-  },
-  "bugs": {
-    "url": "https://github.com/wavedrom/ql/issues"
-  },
-  "main": "./lib",
-  "unpkg": "waveql.unpkg.min.js",
-  "files": [
-    "lib",
-    "waveql.unpkg.min.js"
-  ],
-  "engines": {
-    "node": ">=12"
-  },
-  "scripts": {
-    "test": "npm run eslint && mocha --inline-diffs test && npm run nyc",
-    "eslint": "eslint lib test",
-    "nyc": "nyc -r=lcov -r=text mocha test",
-    "unpkg": "browserify --standalone waveql lib/index.js > waveql.unpkg.js",
-    "unpkg.min": "terser --compress --mengle -- waveql.unpkg.js > waveql.unpkg.min.js",
-    "watch": "watchify ./lib/app.js -o app/main.js -v"
-  },
-  "_scripts": {
-    "prepare": "npm run unpkg && npm run unpkg.min"
-  },
-  "dependencies": {
-    "@codemirror/autocomplete": "^6.12.0",
-    "@codemirror/commands": "^6.3.3",
-    "@codemirror/language": "^6.10.0",
-    "@codemirror/state": "^6.4.0",
-    "@codemirror/view": "^6.23.0",
-    "@lezer/highlight": "^1.2.0"
-  },
-  "devDependencies": {
-    "@drom/eslint-config": "^0.12.0",
-    "browserify": "^17.0.0",
-    "chai": "^4.3.6",
-    "coveralls": "^3.1.1",
-    "eslint": "^8.56.0",
-    "live-server": "^1.2.2",
-    "mocha": "^10.2.0",
-    "nyc": "^15.1",
-    "terser": "^5.27.0",
-    "watchify": "^4.0.0"
-  },
-  "eslintConfig": {
-    "extends": "@drom/eslint-config/eslint8/node12"
-  }
-}
-
-},{}],64:[function(require,module,exports){
+},{"@lezer/common":7}],9:[function(require,module,exports){
 'use strict';
 
-const handleScope = (info, str) => {
-  const [type, name] = str.split(/\s+/);
-  const ero = {kind: 'scope', type, name, body: []};
-  const current = info.stack[info.stack.length - 1];
-  current.body.push(ero);
-  info.stack.push(ero);
-  // console.log(ero);
-};
+const getX = require('./get-x.js');
+const surferer = require('./surferer.js');
 
-const handleUpScope = (info /* , str */) => {
-  info.stack.pop();
-  // console.log(['upscope', str]);
-};
-
-const handleVar = (info, str) => {
-  // reg 3 ( r_reg [2:0]
-  // 0   1 2 3+
-  const eroj = str.split(/\s+/);
-  const ero = {
-    kind: 'var',
-    type: eroj[0],
-    size: parseInt(eroj[1]),
-    link: eroj[2],
-    name: eroj.slice(3).join('')
-  };
-  {
-    const m = ero.name.match('^(?<name>\\w+)\\[' + (ero.size - 1) + ':0]$');
-    if (m) {
-      ero.name = m.groups.name;
+const skipT = (wave, iStart, tLimit) => {
+  let iRes = iStart;
+  let [tRes, vRes] = wave[iStart];
+  for (let i = iStart; i < wave.length; i++) {
+    const [t, v] = wave[i];
+    if (t >= tLimit) {
+      break;
     }
+    iRes = i;
+    tRes = t;
+    vRes = v;
   }
-  const current = info.stack[info.stack.length - 1];
-  current.body.push(ero);
-  // console.log(ero);
+  return [iRes, vRes, tRes];
 };
 
-const commandHandler = (info, cmd, str) => {
-  str = str.trim();
-  switch(cmd) {
-  case 1:
-    info.comment = str;
-    // console.log(['comment', str]);
-    break;
-  case 2:
-    info.date = str;
-    // console.log(['date', str]);
-    break;
-  case 3:
-    handleScope(info, str);
-    break;
-  case 4:
-    info.timescale = str;
-    // console.log(['timescale', str]);
-    break;
-  case 5:
-    handleUpScope(info, str);
-    break;
-  case 6:
-    handleVar(info, str);
-    break;
-  case 7:
-    info.version = str;
-    // console.log(['version', str]);
-    break;
-  default:
-    console.log([cmd, str]);
-  }
-};
+const bracer = (lane, desc, pstate) => {
+  const body = lane.body;
+  const { yStep } = pstate;
+  let { clock, valid, ready, up } = body;
+  up = up || 1;
 
-module.exports = commandHandler;
+  const res = [];
+  let count = 0;
 
-},{}],65:[function(require,module,exports){
-'use strict';
+  if (clock && clock.ref) {
+    const clockWave = desc.chango[clock.ref].wave;
+    const clockEr = surferer(clockWave, pstate);
+    let tPrevClock = 0;
 
-const maxChunkLength = 1 << 17; // Number.MAX_SAFE_INTEGER; // 5e6; // 300000; // 1 << 23;
+    if (valid && valid.ref) {
+      const validWave = desc.chango[valid.ref].wave;
+      let iValid = 0;
+      let vValid;
 
-const getVcd = async (readers, content, inst) => {
-  const r = readers.find(reader => reader.ext === 'vcd');
-  if (r) {
-    // console.log('VCD', r);
-    document.title = r.baseName;
-    content.innerHTML = '<div class="wd-progress">LOADING...</div>';
-    let total = 0;
-    outerLoop:
-    for (let i = 0; i < 1e5; i++) {
-      const { done, value } = await r.reader.read();
+      if (ready && ready.ref) {
+        const readyWave = desc.chango[ready.ref].wave;
+        let iReady = 0;
+        let vReady;
 
-      if (done && (value === undefined)) {
-        // console.log('the end');
-        inst.end();
-        break outerLoop;
-      }
-      const len = value.length;
-      for (let j = 0; j < len; j += maxChunkLength) {
-        const value1 = value.slice(j, j + maxChunkLength);
-        const len1 = value1.length;
-        total += len1;
-
-        // const vh = u8toStr(value1.slice(0, 100));
-        // const vt = u8toStr(value1.slice(-100));
-        // console.log({len1, done, total, vh, vt});
-
-        content.innerHTML = '<div class="wd-progress">' + total.toLocaleString() + '</div>';
-        if (done && ((j + maxChunkLength) >= len)) {
-          // console.log('last chunk');
-          inst.end(value1);
-          break outerLoop;
+        for (const iClock of clockEr) {
+          const [tClock, vClock] = clockWave[iClock];
+          if (vClock) {
+            [iValid, vValid] = skipT(validWave, iValid, tClock);
+            [iReady, vReady] = skipT(readyWave, iReady, tClock);
+            const xClock = getX(pstate, tClock);
+            const xPrevClock = getX(pstate, tPrevClock);
+            const width = xClock - xPrevClock;
+            const height = up * yStep;
+            if (xClock > 0 && xPrevClock > 0 && width > 0) {
+              if (vValid) {
+                if (width >= 1) {
+                  if (vReady) {
+                    res.push(['rect', {fill: 'url(\'#valid&ready\')', width: Math.round(width), height, x: Math.round(xPrevClock), y: -height}]);
+                  } else {
+                    res.push(['rect', {fill: 'url(\'#valid&~ready\')', width: Math.round(width), height, x: Math.round(xPrevClock), y: -height}]);
+                  }
+                  count++;
+                } else {
+                  count += 10;
+                }
+              }
+            }
+            tPrevClock = tClock;
+            if (count > 500) {
+              return res;
+            }
+          }
         }
-        inst.write(value1);
+      } else {
+        for (const iClock of clockEr) {
+          const [tClock, vClock] = clockWave[iClock];
+          if (vClock) {
+            [iValid, vValid] = skipT(validWave, iValid, tClock);
+            const xClock = getX(pstate, tClock);
+            const xPrevClock = getX(pstate, tPrevClock);
+            const width = xClock - xPrevClock;
+            const height = up * yStep;
+            if (xClock > 0 && xPrevClock > 0 && width > 0) {
+              if (vValid) {
+                if (width >= 1) {
+                  res.push(['rect', {fill: 'url(\'#valid\')', width: Math.round(width), height, x: Math.round(xPrevClock), y: -height}]);
+                  count++;
+                } else {
+                  count += 10;
+                }
+              }
+            }
+            tPrevClock = tClock;
+            if (count > 500) {
+              return res;
+            }
+          }
+        }
       }
     }
   }
+  return res;
 };
 
-module.exports = getVcd;
+module.exports = bracer;
 
-/* eslint-env browser */
-
-},{}],66:[function(require,module,exports){
+/* eslint complexity: [1, 55] */
+},{"./get-x.js":19,"./surferer.js":31}],10:[function(require,module,exports){
 'use strict';
 
-const parseTimescale = str => {
-  if (typeof str !== 'string') {
+const genRenderWavesGL = require('./gen-render-waves-gl.js');
+const renderCursor = require('./render-cursor.js');
+const genResizeHandler = require('./gen-resize-handler.js');
+const mTree = require('./mount-tree.js');
+const helpPanel = require('./help-panel.js');
+
+const setTime = (pstate, str) => {
+  // const { sidebarOffset, time, timescale, tgcd, xOffset } = pstate;
+  // pstate.xOffset = .5; // (2 * (pstate.width - pstate.sidebarWidth)) / pstate.time;
+  const m = str.match(/(\d+)(\w+)/); if (m) {
+    // const time1 = parseInt(m[1]);
+    // const timescale1 = ({s: 0, ms: -3, us: -6, ns: -9, ps: -12, fs: -15})[m[2]] || 0;
+    // pstate.xOffset = -1;
+  }
+};
+
+const mouseMoveHandler = (cursor, content, pstate /* , render */) => {
+  const xmargin = 160;
+  const fontHeight = 20;
+  const fontWidth = fontHeight / 2;
+  const handler = event => {
+    const x = pstate.xCursor = event.clientX;
+    cursor.style.left = (x - xmargin) + 'px';
+    cursor.innerHTML = renderCursor({xmargin, fontWidth, fontHeight}, pstate);
+  };
+  handler({clientX: pstate.width / 2});
+  content.addEventListener('mousemove', handler);
+};
+
+
+const getFullView = desc => {
+  if (desc.waveql) {
     return;
   }
-  const str1 = str.trim();
-  const m = str1.match(/^(\d+)\s*(\w+)$/);
-  const res1 = ({1: 0, 10: 1, 100: 2})[m[1]];
-  const res2 = ({s: 0, ms: -3, us: -6, ns: -9, ps: -12, fs: -15})[m[2]];
-  return res1 + res2;
-};
 
-module.exports = parseTimescale;
+  const arr = [];
 
-},{}],67:[function(require,module,exports){
-'use strict';
-
-const parseTimescale = require('./parse-time-scale.js');
-
-const MAX_SAFE_INTEGER = BigInt(Number.MAX_SAFE_INTEGER);
-
-const numberOrString = val => {
-  if (val < MAX_SAFE_INTEGER) {
-    return Number(val);
-  }
-  return '0x' + val.toString(16);
-};
-
-const gcd = (a, b) => {
-  if (a === undefined) {
-    return b;
-  }
-  let r;
-  while (b !== 0) {
-    r = a % b;
-    a = b;
-    b = r;
-  }
-  return (a < 0) ? -a : a;
-};
-
-const tNorm = o => {
-  const {tgcd, chango} = o;
-
-  o.t0 /= tgcd;
-  o.time /= tgcd;
-  Object.keys(chango).map(key => {
-    const {wave} = chango[key];
-    wave.map(e => {
-      e[0] /= tgcd;
-    });
-  });
-
-  const exp = Math.log10(tgcd) |0;
-  if (exp > 0) {
-    const scale = Math.pow(10, exp);
-    const tgcd1 = tgcd / scale;
-    if (tgcd1 === (tgcd1 |0)) {
-      o.tgcd = tgcd1;
-      o.timescale += exp;
+  const rec = ero => {
+    if (ero.kind === 'scope') {
+      arr.push(ero.name);
+      ero.body.map(rec);
+      arr.push('..');
+      return;
     }
-  }
-  return o;
-};
-
-
-module.exports = async (deso, inst, done) => {
-  const chango = {};
-  let tgcd;
-  deso.chango = chango;
-  deso.view = [];
-
-  const onAnyChange = (id, time, cmd, value, mask) => {
-    // console.log(id, time, cmd, value, mask);
-    const time53 = Number(time);
-    tgcd = gcd(tgcd, time53);
-    chango[id] = chango[id] || {wave: []};
-    if (cmd >= 14 && cmd <= 28) {
-      chango[id].kind = 'bit';
-      chango[id].wave.push([time53, cmd - 14]);
-    } else {
-      chango[id].kind = 'vec';
-      const point = [time53, numberOrString(value)];
-      if (mask !== 0n) {
-        point.push(numberOrString(mask));
-      }
-      chango[id].wave.push(point);
+    if (ero.kind === 'var') {
+      arr.push(ero.name);
+      return;
     }
+    console.error(ero);
+    throw new Error();
+    // Object.keys(obj).map(name => {
+    //   const ref = obj[name];
+    //   if (typeof ref === 'object') {
+    //     arr.push(name);
+    //     rec(ref);
+    //     arr.push('..');
+    //     return;
+    //   }
+    //   if (typeof ref !== 'string') {
+    //     throw new Error();
+    //   }
+    //   arr.push(name);
+    // });
   };
 
-  const t0 = Date.now();
+  rec(desc.wires);
 
-  inst.on('$enddefinitions', () => {
-    // console.log('$enddefinitions');
-    Object.assign(deso.wires, inst.info.wires);
-    deso.timescale = parseTimescale(inst.info.timescale);
-  });
-
-  inst.change.any(onAnyChange);
-
-  inst.on('finish', () => {
-    console.log((Date.now() - t0) / 1000);
-    deso.tgcd = tgcd;
-    deso.t0 = (inst.info.t0 || 0);
-    // console.log(inst.getTime());
-    deso.time = Number(inst.getTime());
-    tNorm(deso);
-    done(deso);
-  });
+  desc.waveql = arr.join('\n');
 };
 
-},{"./parse-time-scale.js":66}],68:[function(require,module,exports){
-'use strict';
 
-const stream = require('stream');
-const EventEmitter = require('events').EventEmitter;
+const domContainer = (obj) => {
 
-const dotProp = require('dot-prop');
+  const sidebarWidth = 256;
 
-const commandHandler = require('./command-handler.js');
+  const fontHeight = 16;
 
-// function _waitForStart(mod) {
-//   return new Promise((resolve)=>{
-//     mod.addOnPostRun(resolve);
-//   });
-// }
-
-// function u8ToBn(u8) {
-//   let str = '';
-//   for (let i = 0; i < u8.length; i++) {
-//     const val = u8[i];
-//     str = val.toString(16) + str;
-//     if (val < 16) {
-//       str = '0' + str;
-//     }
-//   }
-//   return BigInt('0x' + str);
-// }
-
-function h8ToBn(HEAPU8, start, len) {
-  if (len === 0) {
-    return 0n;
+  const elo = mTree.createElemento(obj.elemento);
+  const container = mTree.createContainer(elo, obj.layers);
+  elo.container.tabIndex = '0';
+  if (obj.pluginRightPanel) {
+    obj.pluginRightPanel(elo);
   }
-  let str = '';
-  const fin = start + len * 8;
-  for (let i = start; i < fin; i++) {
-    const val = HEAPU8[i];
-    str = val.toString(16) + str;
-    if (val < 16) {
-      str = '0' + str;
-    }
-  }
-  return BigInt('0x' + str);
-}
 
-// let startCalled = 0;
-
-const bindCWrap = (c, wasm) => {
-  const w = wasm.cwrap;
-  c.execute    = w('execute',    'number', ['number', 'number', 'number', 'number', 'number', 'array', 'number']);
-  c.init       = w('init',       'number', ['number', 'number', 'number', 'number']);
-  c.getTime    = w('getTime',    'number', ['number']);
-  c.setTrigger = w('setTrigger', 'number', ['number', 'string']);
-};
-
-const getWrapper = wasm => {
-  // console.log(wasm);
-
-  const c = {};
-
-  let bindCallback;
-
-
-  const start = async() => {
-    // if( !startCalled ) {
-    //   await _waitForStart(wasm);
-    //   startCalled++;
-    // }
-    // console.log('s1');
-    bindCWrap(c, wasm);
-    // console.log('s2');
-    bindCallback();
-    // console.log('s3');
-  };
-
-  // gets a string from a c heap pointer and length
-  const getString = (name, len) => {
-
-    // const view = wasm.HEAPU8.subarray(name, name+len);
-    // let string = '';
-    // for (let i = 0; i < len; i++) {
-    //   string += String.fromCharCode(view[i]);
-    // }
-    // return string;
-
-    let string = '';
-    const end = name + len;
-    for (let i = name; i < end; i++) {
-      string += String.fromCharCode(wasm.HEAPU8[i]);
-    }
-    return string;
-
-  };
-
-  let boundInfo;
-
-  let boundSet;
-  let boundGet;
-
-  let ee = [];
-
-  let boundEE0;
-  let boundEE1;
-
-  let context = -1;
-
-
-  const onEE1 = (
-    /* const char* */   eventName,
-    /* const size_t */  eventNameLength, // strlen(name)
-    /* const int64_t */ time,
-    /* const int */     cmd,
-    /* const int */     valueWords,
-    /* uint64_t* */     value,
-    /* const int */     maskWords,
-    /* uint64_t* */     mask
-  ) => {
-    const name = getString(eventName, eventNameLength);
-    // console.log(`event name`);
-    // console.log({name, time, command, valueWords});
-
-
-
-    // const view0 = wasm.HEAPU8.subarray(value, value+(valueWords*8));
-    // const view1 = wasm.HEAPU8.subarray(mask,  mask+(valueWords*8));
-
-    // let bigValue = u8ToBn(view0);
-    // let bigMask = u8ToBn(view1);
-    // let bigValue = 0n;
-
-    // console.log(bigValue.toString(16));
-
-    if (cmd >= 14 && cmd <= 28) {
-      ee[1](name, time, cmd);
-    } else {
-      const bigValue = h8ToBn(wasm.HEAPU8, value, valueWords);
-      const bigMask = h8ToBn(wasm.HEAPU8, mask, maskWords);
-      ee[1](name, time, cmd, bigValue, bigMask);
-    }
-  };
-
-  // wasm.addFunction can't be called until after
-  // start finishes
-  bindCallback = () => {
-    boundSet = wasm.addFunction(function(name, len, type, v0, v1) {
-
-      let prop = getString(name, len);
-      let tmp;
-
-      switch(type) {
-      // set number
-      case 0:
-        boundInfo[prop] = v0;
-        // console.log(`setting ${prop} to ${boundInfo[prop]}`);
-        break;
-      // set string
-      case 1:
-        boundInfo[prop] = getString(v0, v1);
-        // console.log(`setting ${prop} to ${boundInfo[prop]}`);
-        break;
-      // set string to path
-      case 2:
-        dotProp.set(boundInfo, prop, getString(v0, v1));
-        // console.log(`setting ${prop} to ${getString(v0, v1)}`);
-        break;
-      // path to path (any type)
-      case 3:
-        tmp = getString(v0, v1)
-          .split(',')
-          .map(e => dotProp.get(boundInfo, e));
-        if (tmp.length === 1) {
-          dotProp.set(boundInfo, prop, tmp[0]);
-          break;
-        }
-        dotProp.set(boundInfo, prop, tmp);
-        break;
-      // create empty object at path
-      case 4:
-        // console.log(`${prop} is new {}`);
-        dotProp.set(boundInfo, prop, {});
-        break;
-      case 5:
-        commandHandler(boundInfo, v0, prop);
-        break;
-      default: throw new Error();
-      }
-
-
-      // viiiii means returns void, accepts int int int int int
-    }, 'viiiii');
-
-    boundGet = wasm.addFunction(function(name, len) {
-      let prop = getString(name, len);
-      return prop;
-    }, 'iii');
-
-
-    boundEE0 = wasm.addFunction(function(name, len) {
-      ee[0](getString(name, len));
-    }, 'vii');
-
-    boundEE1 = wasm.addFunction(onEE1, 'viijiiiii');
-
+  const pstate = {
+    fontHeight,
+    width: 1024, // [px] window width
+    height: 1024, // [px] window height
+    xScaleMax: 1000,
+    topBarHeight: fontHeight * 1.5, // [px]
+    botBarHeight: fontHeight * 1.5, // [px]
+    // xScaleMin: 1,
+    xOffset: sidebarWidth,
+    yOffset: 0, // [px]
+    yStep: fontHeight * 1.5, // = 24 // [px] wave lane height
+    yDuty: 0.7,
+    sidebarWidth,
+    rightPanelWidth: helpPanel.width,
+    rightPanelVisible: false,
+    container
   };
 
   return {
-    start,
-    c,
-    init: (cb0, cb1, info) => {
-      boundInfo = info;
-      ee[0] = cb0;
-      ee[1] = cb1;
-      context = c.init(boundEE0, boundEE1, boundSet, boundGet);
-      return context;
-    },
-    execute: (ctx, cb0, cb1, info, chunk) => {
-      boundInfo = info;
-      ee[0] = cb0;
-      ee[1] = cb1;
-      return c.execute(ctx, boundEE0, boundEE1, boundSet, boundGet, chunk, chunk.length);
-    },
-    setTrigger: (ctx, triggerString) => {
-      return c.setTrigger(ctx, triggerString);
-    },
-    getTime: (ctx) => {
-      return BigInt(c.getTime(ctx));
-    }
-  };
-
-};
-
-module.exports = async wasm => {
-  const lib = getWrapper(wasm);
-  // console.log('getWrapper', lib);
-  await lib.start();
-  // console.log('vcd wasm srarted');
-  const wires = {kind: 'scope', type: '.', name: '.', body: []};
-  const info = {stack: [wires], wires};
-
-  const s = new stream.Writable();
-
-  // gets called by c with 1 argument, a string
-  const lifemit = s.emit.bind(s);
-
-  const triee = new EventEmitter();
-
-  // gets called by c with 5 arguments
-  // string        eventName
-  // number        state->time
-  // int           command
-  // int           state->value
-  // int           state->mask
-
-  const triemit = triee.emit.bind(triee);
-  let triemit2 = triemit;
-
-  const cxt = lib.init(lifemit, triemit, info);
-
-  s._write = function (chunk, encoding, callback) {
-    // console.log('chunk:', chunk.length);
-    const err = lib.execute(cxt, lifemit, triemit2, info, chunk);
-    if (err) {
-      console.log(err);
-    }
-    // console.log(util.inspect(info, {showHidden: true, depth : null, colorize: true}));
-    // console.log(info.stack[0].top);
-    // console.log(info.stack[1]);
-    // console.log(info.stack[0].top == info.stack[1]);
-    callback();
-  };
-
-  s.change = {
-    on: (id, fn) => {
-      triemit2 = triemit;
-      triee.on(id, fn);
-      const triggerString = triee.eventNames().join(' ') + '  ';
-      // console.log(id, Buffer.from(triggerString));
-      lib.setTrigger(cxt, triggerString);
-    },
-    any: fn => {
-      triemit2 = fn;
-      lib.setTrigger(cxt, '\0');
-    }
-  };
-
-  s.info = info;
-
-  s.getTime = () => lib.getTime(cxt);
-
-  s.start = lib.start;
-
-  return s;
-};
-
-},{"./command-handler.js":64,"dot-prop":69,"events":173,"stream":244}],69:[function(require,module,exports){
-'use strict';
-const isObj = require('is-obj');
-
-const disallowedKeys = new Set([
-	'__proto__',
-	'prototype',
-	'constructor'
-]);
-
-const isValidPath = pathSegments => !pathSegments.some(segment => disallowedKeys.has(segment));
-
-function getPathSegments(path) {
-	const pathArray = path.split('.');
-	const parts = [];
-
-	for (let i = 0; i < pathArray.length; i++) {
-		let p = pathArray[i];
-
-		while (p[p.length - 1] === '\\' && pathArray[i + 1] !== undefined) {
-			p = p.slice(0, -1) + '.';
-			p += pathArray[++i];
-		}
-
-		parts.push(p);
-	}
-
-	if (!isValidPath(parts)) {
-		return [];
-	}
-
-	return parts;
-}
-
-module.exports = {
-	get(object, path, value) {
-		if (!isObj(object) || typeof path !== 'string') {
-			return value === undefined ? object : value;
-		}
-
-		const pathArray = getPathSegments(path);
-		if (pathArray.length === 0) {
-			return;
-		}
-
-		for (let i = 0; i < pathArray.length; i++) {
-			object = object[pathArray[i]];
-
-			if (object === undefined || object === null) {
-				// `object` is either `undefined` or `null` so we want to stop the loop, and
-				// if this is not the last bit of the path, and
-				// if it did't return `undefined`
-				// it would return `null` if `object` is `null`
-				// but we want `get({foo: null}, 'foo.bar')` to equal `undefined`, or the supplied value, not `null`
-				if (i !== pathArray.length - 1) {
-					return value;
-				}
-
-				break;
-			}
-		}
-
-		return object === undefined ? value : object;
-	},
-
-	set(object, path, value) {
-		if (!isObj(object) || typeof path !== 'string') {
-			return object;
-		}
-
-		const root = object;
-		const pathArray = getPathSegments(path);
-
-		for (let i = 0; i < pathArray.length; i++) {
-			const p = pathArray[i];
-
-			if (!isObj(object[p])) {
-				object[p] = {};
-			}
-
-			if (i === pathArray.length - 1) {
-				object[p] = value;
-			}
-
-			object = object[p];
-		}
-
-		return root;
-	},
-
-	delete(object, path) {
-		if (!isObj(object) || typeof path !== 'string') {
-			return false;
-		}
-
-		const pathArray = getPathSegments(path);
-
-		for (let i = 0; i < pathArray.length; i++) {
-			const p = pathArray[i];
-
-			if (i === pathArray.length - 1) {
-				delete object[p];
-				return true;
-			}
-
-			object = object[p];
-
-			if (!isObj(object)) {
-				return false;
-			}
-		}
-	},
-
-	has(object, path) {
-		if (!isObj(object) || typeof path !== 'string') {
-			return false;
-		}
-
-		const pathArray = getPathSegments(path);
-		if (pathArray.length === 0) {
-			return false;
-		}
-
-		// eslint-disable-next-line unicorn/no-for-loop
-		for (let i = 0; i < pathArray.length; i++) {
-			if (isObj(object)) {
-				if (!(pathArray[i] in object)) {
-					return false;
-				}
-
-				object = object[pathArray[i]];
-			} else {
-				return false;
-			}
-		}
-
-		return true;
-	}
-};
-
-},{"is-obj":70}],70:[function(require,module,exports){
-'use strict';
-
-module.exports = value => {
-	const type = typeof value;
-	return value !== null && (type === 'object' || type === 'function');
-};
-
-},{}],71:[function(require,module,exports){
-(function (process,Buffer,__filename,__argument0,__argument1,__argument2,__argument3,__dirname){(function (){
-
-var createVCD = (() => {
-  var _scriptDir = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
-  if (typeof __filename !== 'undefined') _scriptDir = _scriptDir || __filename;
-  return (
-function(createVCD = {})  {
-
-var Module=typeof createVCD!="undefined"?createVCD:{};var readyPromiseResolve,readyPromiseReject;Module["ready"]=new Promise(function(resolve,reject){readyPromiseResolve=resolve;readyPromiseReject=reject});var moduleOverrides=Object.assign({},Module);var arguments_=[];var thisProgram="./this.program";var quit_=(status,toThrow)=>{throw toThrow};var ENVIRONMENT_IS_WEB=typeof window=="object";var ENVIRONMENT_IS_WORKER=typeof importScripts=="function";var ENVIRONMENT_IS_NODE=typeof process=="object"&&typeof process.versions=="object"&&typeof process.versions.node=="string";var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var read_,readAsync,readBinary,setWindowTitle;if(ENVIRONMENT_IS_NODE){var fs=require("fs");var nodePath=require("path");if(ENVIRONMENT_IS_WORKER){scriptDirectory=nodePath.dirname(scriptDirectory)+"/"}else{scriptDirectory=__dirname+"/"}read_=(filename,binary)=>{filename=isFileURI(filename)?new URL(filename):nodePath.normalize(filename);return fs.readFileSync(filename,binary?undefined:"utf8")};readBinary=filename=>{var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret)}return ret};readAsync=(filename,onload,onerror)=>{filename=isFileURI(filename)?new URL(filename):nodePath.normalize(filename);fs.readFile(filename,function(err,data){if(err)onerror(err);else onload(data.buffer)})};if(!Module["thisProgram"]&&process.argv.length>1){thisProgram=process.argv[1].replace(/\\/g,"/")}arguments_=process.argv.slice(2);quit_=(status,toThrow)=>{process.exitCode=status;throw toThrow};Module["inspect"]=function(){return"[Emscripten Module object]"}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){if(ENVIRONMENT_IS_WORKER){scriptDirectory=self.location.href}else if(typeof document!="undefined"&&document.currentScript){scriptDirectory=document.currentScript.src}if(_scriptDir){scriptDirectory=_scriptDir}if(scriptDirectory.indexOf("blob:")!==0){scriptDirectory=scriptDirectory.substr(0,scriptDirectory.replace(/[?#].*/,"").lastIndexOf("/")+1)}else{scriptDirectory=""}{read_=url=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.send(null);return xhr.responseText};if(ENVIRONMENT_IS_WORKER){readBinary=url=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)}}readAsync=(url,onload,onerror)=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,true);xhr.responseType="arraybuffer";xhr.onload=()=>{if(xhr.status==200||xhr.status==0&&xhr.response){onload(xhr.response);return}onerror()};xhr.onerror=onerror;xhr.send(null)}}setWindowTitle=title=>document.title=title}else{}var out=Module["print"]||console.log.bind(console);var err=Module["printErr"]||console.warn.bind(console);Object.assign(Module,moduleOverrides);moduleOverrides=null;if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["quit"])quit_=Module["quit"];var wasmBinary;if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];var noExitRuntime=Module["noExitRuntime"]||true;if(typeof WebAssembly!="object"){abort("no native wasm support detected")}var wasmMemory;var ABORT=false;var EXITSTATUS;function assert(condition,text){if(!condition){abort(text)}}var HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAP64,HEAPU64,HEAPF64;function updateMemoryViews(){var b=wasmMemory.buffer;Module["HEAP8"]=HEAP8=new Int8Array(b);Module["HEAP16"]=HEAP16=new Int16Array(b);Module["HEAP32"]=HEAP32=new Int32Array(b);Module["HEAPU8"]=HEAPU8=new Uint8Array(b);Module["HEAPU16"]=HEAPU16=new Uint16Array(b);Module["HEAPU32"]=HEAPU32=new Uint32Array(b);Module["HEAPF32"]=HEAPF32=new Float32Array(b);Module["HEAPF64"]=HEAPF64=new Float64Array(b);Module["HEAP64"]=HEAP64=new BigInt64Array(b);Module["HEAPU64"]=HEAPU64=new BigUint64Array(b)}var wasmTable;var __ATPRERUN__=[];var __ATINIT__=[];var __ATMAIN__=[];var __ATPOSTRUN__=[];var runtimeInitialized=false;var runtimeKeepaliveCounter=0;function keepRuntimeAlive(){return noExitRuntime||runtimeKeepaliveCounter>0}function preRun(){if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift())}}callRuntimeCallbacks(__ATPRERUN__)}function initRuntime(){runtimeInitialized=true;if(!Module["noFSInit"]&&!FS.init.initialized)FS.init();FS.ignorePermissions=false;TTY.init();callRuntimeCallbacks(__ATINIT__)}function preMain(){callRuntimeCallbacks(__ATMAIN__)}function postRun(){if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift())}}callRuntimeCallbacks(__ATPOSTRUN__)}function addOnPreRun(cb){__ATPRERUN__.unshift(cb)}function addOnInit(cb){__ATINIT__.unshift(cb)}function addOnPostRun(cb){__ATPOSTRUN__.unshift(cb)}var runDependencies=0;var runDependencyWatcher=null;var dependenciesFulfilled=null;function getUniqueRunDependency(id){return id}function addRunDependency(id){runDependencies++;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies)}}function removeRunDependency(id){runDependencies--;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies)}if(runDependencies==0){if(runDependencyWatcher!==null){clearInterval(runDependencyWatcher);runDependencyWatcher=null}if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback()}}}function abort(what){if(Module["onAbort"]){Module["onAbort"](what)}what="Aborted("+what+")";err(what);ABORT=true;EXITSTATUS=1;what+=". Build with -sASSERTIONS for more info.";var e=new WebAssembly.RuntimeError(what);readyPromiseReject(e);throw e}var dataURIPrefix="data:application/octet-stream;base64,";function isDataURI(filename){return filename.startsWith(dataURIPrefix)}function isFileURI(filename){return filename.startsWith("file://")}var wasmBinaryFile;wasmBinaryFile="vcd.wasm";if(!isDataURI(wasmBinaryFile)){wasmBinaryFile=locateFile(wasmBinaryFile)}function getBinary(file){try{if(file==wasmBinaryFile&&wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(file)}throw"both async and sync fetching of the wasm failed"}catch(err){abort(err)}}function getBinaryPromise(binaryFile){if(!wasmBinary&&(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER)){if(typeof fetch=="function"&&!isFileURI(binaryFile)){return fetch(binaryFile,{credentials:"same-origin"}).then(function(response){if(!response["ok"]){throw"failed to load wasm binary file at '"+binaryFile+"'"}return response["arrayBuffer"]()}).catch(function(){return getBinary(binaryFile)})}else{if(readAsync){return new Promise(function(resolve,reject){readAsync(binaryFile,function(response){resolve(new Uint8Array(response))},reject)})}}}return Promise.resolve().then(function(){return getBinary(binaryFile)})}function instantiateArrayBuffer(binaryFile,imports,receiver){return getBinaryPromise(binaryFile).then(function(binary){return WebAssembly.instantiate(binary,imports)}).then(function(instance){return instance}).then(receiver,function(reason){err("failed to asynchronously prepare wasm: "+reason);abort(reason)})}function instantiateAsync(binary,binaryFile,imports,callback){if(!binary&&typeof WebAssembly.instantiateStreaming=="function"&&!isDataURI(binaryFile)&&!isFileURI(binaryFile)&&!ENVIRONMENT_IS_NODE&&typeof fetch=="function"){return fetch(binaryFile,{credentials:"same-origin"}).then(function(response){var result=WebAssembly.instantiateStreaming(response,imports);return result.then(callback,function(reason){err("wasm streaming compile failed: "+reason);err("falling back to ArrayBuffer instantiation");return instantiateArrayBuffer(binaryFile,imports,callback)})})}else{return instantiateArrayBuffer(binaryFile,imports,callback)}}function createWasm(){var info={"a":wasmImports};function receiveInstance(instance,module){var exports=instance.exports;Module["asm"]=exports;wasmMemory=Module["asm"]["k"];updateMemoryViews();wasmTable=Module["asm"]["r"];addOnInit(Module["asm"]["l"]);removeRunDependency("wasm-instantiate");return exports}addRunDependency("wasm-instantiate");function receiveInstantiationResult(result){receiveInstance(result["instance"])}if(Module["instantiateWasm"]){try{return Module["instantiateWasm"](info,receiveInstance)}catch(e){err("Module.instantiateWasm callback failed with error: "+e);readyPromiseReject(e)}}instantiateAsync(wasmBinary,wasmBinaryFile,info,receiveInstantiationResult).catch(readyPromiseReject);return{}}var tempDouble;var tempI64;function ExitStatus(status){this.name="ExitStatus";this.message="Program terminated with exit("+status+")";this.status=status}function callRuntimeCallbacks(callbacks){while(callbacks.length>0){callbacks.shift()(Module)}}function getValue(ptr,type="i8"){if(type.endsWith("*"))type="*";switch(type){case"i1":return HEAP8[ptr>>0];case"i8":return HEAP8[ptr>>0];case"i16":return HEAP16[ptr>>1];case"i32":return HEAP32[ptr>>2];case"i64":return HEAP64[ptr>>3];case"float":return HEAPF32[ptr>>2];case"double":return HEAPF64[ptr>>3];case"*":return HEAPU32[ptr>>2];default:abort("invalid type for getValue: "+type)}}function setValue(ptr,value,type="i8"){if(type.endsWith("*"))type="*";switch(type){case"i1":HEAP8[ptr>>0]=value;break;case"i8":HEAP8[ptr>>0]=value;break;case"i16":HEAP16[ptr>>1]=value;break;case"i32":HEAP32[ptr>>2]=value;break;case"i64":tempI64=[value>>>0,(tempDouble=value,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[ptr>>2]=tempI64[0],HEAP32[ptr+4>>2]=tempI64[1];break;case"float":HEAPF32[ptr>>2]=value;break;case"double":HEAPF64[ptr>>3]=value;break;case"*":HEAPU32[ptr>>2]=value;break;default:abort("invalid type for setValue: "+type)}}function _abort(){abort("")}function _emscripten_memcpy_big(dest,src,num){HEAPU8.copyWithin(dest,src,src+num)}function getHeapMax(){return 2147483648}function emscripten_realloc_buffer(size){var b=wasmMemory.buffer;try{wasmMemory.grow(size-b.byteLength+65535>>>16);updateMemoryViews();return 1}catch(e){}}function _emscripten_resize_heap(requestedSize){var oldSize=HEAPU8.length;requestedSize=requestedSize>>>0;var maxHeapSize=getHeapMax();if(requestedSize>maxHeapSize){return false}let alignUp=(x,multiple)=>x+(multiple-x%multiple)%multiple;for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignUp(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=emscripten_realloc_buffer(newSize);if(replacement){return true}}return false}var ENV={};function getExecutableName(){return thisProgram||"./this.program"}function getEnvStrings(){if(!getEnvStrings.strings){var lang=(typeof navigator=="object"&&navigator.languages&&navigator.languages[0]||"C").replace("-","_")+".UTF-8";var env={"USER":"web_user","LOGNAME":"web_user","PATH":"/","PWD":"/","HOME":"/home/web_user","LANG":lang,"_":getExecutableName()};for(var x in ENV){if(ENV[x]===undefined)delete env[x];else env[x]=ENV[x]}var strings=[];for(var x in env){strings.push(x+"="+env[x])}getEnvStrings.strings=strings}return getEnvStrings.strings}function stringToAscii(str,buffer){for(var i=0;i<str.length;++i){HEAP8[buffer++>>0]=str.charCodeAt(i)}HEAP8[buffer>>0]=0}var PATH={isAbs:path=>path.charAt(0)==="/",splitPath:filename=>{var splitPathRe=/^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;return splitPathRe.exec(filename).slice(1)},normalizeArray:(parts,allowAboveRoot)=>{var up=0;for(var i=parts.length-1;i>=0;i--){var last=parts[i];if(last==="."){parts.splice(i,1)}else if(last===".."){parts.splice(i,1);up++}else if(up){parts.splice(i,1);up--}}if(allowAboveRoot){for(;up;up--){parts.unshift("..")}}return parts},normalize:path=>{var isAbsolute=PATH.isAbs(path),trailingSlash=path.substr(-1)==="/";path=PATH.normalizeArray(path.split("/").filter(p=>!!p),!isAbsolute).join("/");if(!path&&!isAbsolute){path="."}if(path&&trailingSlash){path+="/"}return(isAbsolute?"/":"")+path},dirname:path=>{var result=PATH.splitPath(path),root=result[0],dir=result[1];if(!root&&!dir){return"."}if(dir){dir=dir.substr(0,dir.length-1)}return root+dir},basename:path=>{if(path==="/")return"/";path=PATH.normalize(path);path=path.replace(/\/$/,"");var lastSlash=path.lastIndexOf("/");if(lastSlash===-1)return path;return path.substr(lastSlash+1)},join:function(){var paths=Array.prototype.slice.call(arguments);return PATH.normalize(paths.join("/"))},join2:(l,r)=>{return PATH.normalize(l+"/"+r)}};function initRandomFill(){if(typeof crypto=="object"&&typeof crypto["getRandomValues"]=="function"){return view=>crypto.getRandomValues(view)}else if(ENVIRONMENT_IS_NODE){try{var crypto_module=require("crypto");var randomFillSync=crypto_module["randomFillSync"];if(randomFillSync){return view=>crypto_module["randomFillSync"](view)}var randomBytes=crypto_module["randomBytes"];return view=>(view.set(randomBytes(view.byteLength)),view)}catch(e){}}abort("initRandomDevice")}function randomFill(view){return(randomFill=initRandomFill())(view)}var PATH_FS={resolve:function(){var resolvedPath="",resolvedAbsolute=false;for(var i=arguments.length-1;i>=-1&&!resolvedAbsolute;i--){var path=i>=0?arguments[i]:FS.cwd();if(typeof path!="string"){throw new TypeError("Arguments to path.resolve must be strings")}else if(!path){return""}resolvedPath=path+"/"+resolvedPath;resolvedAbsolute=PATH.isAbs(path)}resolvedPath=PATH.normalizeArray(resolvedPath.split("/").filter(p=>!!p),!resolvedAbsolute).join("/");return(resolvedAbsolute?"/":"")+resolvedPath||"."},relative:(from,to)=>{from=PATH_FS.resolve(from).substr(1);to=PATH_FS.resolve(to).substr(1);function trim(arr){var start=0;for(;start<arr.length;start++){if(arr[start]!=="")break}var end=arr.length-1;for(;end>=0;end--){if(arr[end]!=="")break}if(start>end)return[];return arr.slice(start,end-start+1)}var fromParts=trim(from.split("/"));var toParts=trim(to.split("/"));var length=Math.min(fromParts.length,toParts.length);var samePartsLength=length;for(var i=0;i<length;i++){if(fromParts[i]!==toParts[i]){samePartsLength=i;break}}var outputParts=[];for(var i=samePartsLength;i<fromParts.length;i++){outputParts.push("..")}outputParts=outputParts.concat(toParts.slice(samePartsLength));return outputParts.join("/")}};function lengthBytesUTF8(str){var len=0;for(var i=0;i<str.length;++i){var c=str.charCodeAt(i);if(c<=127){len++}else if(c<=2047){len+=2}else if(c>=55296&&c<=57343){len+=4;++i}else{len+=3}}return len}function stringToUTF8Array(str,heap,outIdx,maxBytesToWrite){if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343){var u1=str.charCodeAt(++i);u=65536+((u&1023)<<10)|u1&1023}if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}}heap[outIdx]=0;return outIdx-startIdx}function intArrayFromString(stringy,dontAddNull,length){var len=length>0?length:lengthBytesUTF8(stringy)+1;var u8array=new Array(len);var numBytesWritten=stringToUTF8Array(stringy,u8array,0,u8array.length);if(dontAddNull)u8array.length=numBytesWritten;return u8array}var TTY={ttys:[],init:function(){},shutdown:function(){},register:function(dev,ops){TTY.ttys[dev]={input:[],output:[],ops:ops};FS.registerDevice(dev,TTY.stream_ops)},stream_ops:{open:function(stream){var tty=TTY.ttys[stream.node.rdev];if(!tty){throw new FS.ErrnoError(43)}stream.tty=tty;stream.seekable=false},close:function(stream){stream.tty.ops.fsync(stream.tty)},fsync:function(stream){stream.tty.ops.fsync(stream.tty)},read:function(stream,buffer,offset,length,pos){if(!stream.tty||!stream.tty.ops.get_char){throw new FS.ErrnoError(60)}var bytesRead=0;for(var i=0;i<length;i++){var result;try{result=stream.tty.ops.get_char(stream.tty)}catch(e){throw new FS.ErrnoError(29)}if(result===undefined&&bytesRead===0){throw new FS.ErrnoError(6)}if(result===null||result===undefined)break;bytesRead++;buffer[offset+i]=result}if(bytesRead){stream.node.timestamp=Date.now()}return bytesRead},write:function(stream,buffer,offset,length,pos){if(!stream.tty||!stream.tty.ops.put_char){throw new FS.ErrnoError(60)}try{for(var i=0;i<length;i++){stream.tty.ops.put_char(stream.tty,buffer[offset+i])}}catch(e){throw new FS.ErrnoError(29)}if(length){stream.node.timestamp=Date.now()}return i}},default_tty_ops:{get_char:function(tty){if(!tty.input.length){var result=null;if(ENVIRONMENT_IS_NODE){var BUFSIZE=256;var buf=Buffer.alloc(BUFSIZE);var bytesRead=0;try{bytesRead=fs.readSync(process.stdin.fd,buf,0,BUFSIZE,-1)}catch(e){if(e.toString().includes("EOF"))bytesRead=0;else throw e}if(bytesRead>0){result=buf.slice(0,bytesRead).toString("utf-8")}else{result=null}}else if(typeof window!="undefined"&&typeof window.prompt=="function"){result=window.prompt("Input: ");if(result!==null){result+="\n"}}else if(typeof readline=="function"){result=readline();if(result!==null){result+="\n"}}if(!result){return null}tty.input=intArrayFromString(result,true)}return tty.input.shift()},put_char:function(tty,val){if(val===null||val===10){out(UTF8ArrayToString(tty.output,0));tty.output=[]}else{if(val!=0)tty.output.push(val)}},fsync:function(tty){if(tty.output&&tty.output.length>0){out(UTF8ArrayToString(tty.output,0));tty.output=[]}}},default_tty1_ops:{put_char:function(tty,val){if(val===null||val===10){err(UTF8ArrayToString(tty.output,0));tty.output=[]}else{if(val!=0)tty.output.push(val)}},fsync:function(tty){if(tty.output&&tty.output.length>0){err(UTF8ArrayToString(tty.output,0));tty.output=[]}}}};function mmapAlloc(size){abort()}var MEMFS={ops_table:null,mount:function(mount){return MEMFS.createNode(null,"/",16384|511,0)},createNode:function(parent,name,mode,dev){if(FS.isBlkdev(mode)||FS.isFIFO(mode)){throw new FS.ErrnoError(63)}if(!MEMFS.ops_table){MEMFS.ops_table={dir:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr,lookup:MEMFS.node_ops.lookup,mknod:MEMFS.node_ops.mknod,rename:MEMFS.node_ops.rename,unlink:MEMFS.node_ops.unlink,rmdir:MEMFS.node_ops.rmdir,readdir:MEMFS.node_ops.readdir,symlink:MEMFS.node_ops.symlink},stream:{llseek:MEMFS.stream_ops.llseek}},file:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr},stream:{llseek:MEMFS.stream_ops.llseek,read:MEMFS.stream_ops.read,write:MEMFS.stream_ops.write,allocate:MEMFS.stream_ops.allocate,mmap:MEMFS.stream_ops.mmap,msync:MEMFS.stream_ops.msync}},link:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr,readlink:MEMFS.node_ops.readlink},stream:{}},chrdev:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr},stream:FS.chrdev_stream_ops}}}var node=FS.createNode(parent,name,mode,dev);if(FS.isDir(node.mode)){node.node_ops=MEMFS.ops_table.dir.node;node.stream_ops=MEMFS.ops_table.dir.stream;node.contents={}}else if(FS.isFile(node.mode)){node.node_ops=MEMFS.ops_table.file.node;node.stream_ops=MEMFS.ops_table.file.stream;node.usedBytes=0;node.contents=null}else if(FS.isLink(node.mode)){node.node_ops=MEMFS.ops_table.link.node;node.stream_ops=MEMFS.ops_table.link.stream}else if(FS.isChrdev(node.mode)){node.node_ops=MEMFS.ops_table.chrdev.node;node.stream_ops=MEMFS.ops_table.chrdev.stream}node.timestamp=Date.now();if(parent){parent.contents[name]=node;parent.timestamp=node.timestamp}return node},getFileDataAsTypedArray:function(node){if(!node.contents)return new Uint8Array(0);if(node.contents.subarray)return node.contents.subarray(0,node.usedBytes);return new Uint8Array(node.contents)},expandFileStorage:function(node,newCapacity){var prevCapacity=node.contents?node.contents.length:0;if(prevCapacity>=newCapacity)return;var CAPACITY_DOUBLING_MAX=1024*1024;newCapacity=Math.max(newCapacity,prevCapacity*(prevCapacity<CAPACITY_DOUBLING_MAX?2:1.125)>>>0);if(prevCapacity!=0)newCapacity=Math.max(newCapacity,256);var oldContents=node.contents;node.contents=new Uint8Array(newCapacity);if(node.usedBytes>0)node.contents.set(oldContents.subarray(0,node.usedBytes),0)},resizeFileStorage:function(node,newSize){if(node.usedBytes==newSize)return;if(newSize==0){node.contents=null;node.usedBytes=0}else{var oldContents=node.contents;node.contents=new Uint8Array(newSize);if(oldContents){node.contents.set(oldContents.subarray(0,Math.min(newSize,node.usedBytes)))}node.usedBytes=newSize}},node_ops:{getattr:function(node){var attr={};attr.dev=FS.isChrdev(node.mode)?node.id:1;attr.ino=node.id;attr.mode=node.mode;attr.nlink=1;attr.uid=0;attr.gid=0;attr.rdev=node.rdev;if(FS.isDir(node.mode)){attr.size=4096}else if(FS.isFile(node.mode)){attr.size=node.usedBytes}else if(FS.isLink(node.mode)){attr.size=node.link.length}else{attr.size=0}attr.atime=new Date(node.timestamp);attr.mtime=new Date(node.timestamp);attr.ctime=new Date(node.timestamp);attr.blksize=4096;attr.blocks=Math.ceil(attr.size/attr.blksize);return attr},setattr:function(node,attr){if(attr.mode!==undefined){node.mode=attr.mode}if(attr.timestamp!==undefined){node.timestamp=attr.timestamp}if(attr.size!==undefined){MEMFS.resizeFileStorage(node,attr.size)}},lookup:function(parent,name){throw FS.genericErrors[44]},mknod:function(parent,name,mode,dev){return MEMFS.createNode(parent,name,mode,dev)},rename:function(old_node,new_dir,new_name){if(FS.isDir(old_node.mode)){var new_node;try{new_node=FS.lookupNode(new_dir,new_name)}catch(e){}if(new_node){for(var i in new_node.contents){throw new FS.ErrnoError(55)}}}delete old_node.parent.contents[old_node.name];old_node.parent.timestamp=Date.now();old_node.name=new_name;new_dir.contents[new_name]=old_node;new_dir.timestamp=old_node.parent.timestamp;old_node.parent=new_dir},unlink:function(parent,name){delete parent.contents[name];parent.timestamp=Date.now()},rmdir:function(parent,name){var node=FS.lookupNode(parent,name);for(var i in node.contents){throw new FS.ErrnoError(55)}delete parent.contents[name];parent.timestamp=Date.now()},readdir:function(node){var entries=[".",".."];for(var key in node.contents){if(!node.contents.hasOwnProperty(key)){continue}entries.push(key)}return entries},symlink:function(parent,newname,oldpath){var node=MEMFS.createNode(parent,newname,511|40960,0);node.link=oldpath;return node},readlink:function(node){if(!FS.isLink(node.mode)){throw new FS.ErrnoError(28)}return node.link}},stream_ops:{read:function(stream,buffer,offset,length,position){var contents=stream.node.contents;if(position>=stream.node.usedBytes)return 0;var size=Math.min(stream.node.usedBytes-position,length);if(size>8&&contents.subarray){buffer.set(contents.subarray(position,position+size),offset)}else{for(var i=0;i<size;i++)buffer[offset+i]=contents[position+i]}return size},write:function(stream,buffer,offset,length,position,canOwn){if(buffer.buffer===HEAP8.buffer){canOwn=false}if(!length)return 0;var node=stream.node;node.timestamp=Date.now();if(buffer.subarray&&(!node.contents||node.contents.subarray)){if(canOwn){node.contents=buffer.subarray(offset,offset+length);node.usedBytes=length;return length}else if(node.usedBytes===0&&position===0){node.contents=buffer.slice(offset,offset+length);node.usedBytes=length;return length}else if(position+length<=node.usedBytes){node.contents.set(buffer.subarray(offset,offset+length),position);return length}}MEMFS.expandFileStorage(node,position+length);if(node.contents.subarray&&buffer.subarray){node.contents.set(buffer.subarray(offset,offset+length),position)}else{for(var i=0;i<length;i++){node.contents[position+i]=buffer[offset+i]}}node.usedBytes=Math.max(node.usedBytes,position+length);return length},llseek:function(stream,offset,whence){var position=offset;if(whence===1){position+=stream.position}else if(whence===2){if(FS.isFile(stream.node.mode)){position+=stream.node.usedBytes}}if(position<0){throw new FS.ErrnoError(28)}return position},allocate:function(stream,offset,length){MEMFS.expandFileStorage(stream.node,offset+length);stream.node.usedBytes=Math.max(stream.node.usedBytes,offset+length)},mmap:function(stream,length,position,prot,flags){if(!FS.isFile(stream.node.mode)){throw new FS.ErrnoError(43)}var ptr;var allocated;var contents=stream.node.contents;if(!(flags&2)&&contents.buffer===HEAP8.buffer){allocated=false;ptr=contents.byteOffset}else{if(position>0||position+length<contents.length){if(contents.subarray){contents=contents.subarray(position,position+length)}else{contents=Array.prototype.slice.call(contents,position,position+length)}}allocated=true;ptr=mmapAlloc(length);if(!ptr){throw new FS.ErrnoError(48)}HEAP8.set(contents,ptr)}return{ptr:ptr,allocated:allocated}},msync:function(stream,buffer,offset,length,mmapFlags){MEMFS.stream_ops.write(stream,buffer,0,length,offset,false);return 0}}};function asyncLoad(url,onload,onerror,noRunDep){var dep=!noRunDep?getUniqueRunDependency("al "+url):"";readAsync(url,arrayBuffer=>{assert(arrayBuffer,'Loading data file "'+url+'" failed (no arrayBuffer).');onload(new Uint8Array(arrayBuffer));if(dep)removeRunDependency(dep)},event=>{if(onerror){onerror()}else{throw'Loading data file "'+url+'" failed.'}});if(dep)addRunDependency(dep)}var FS={root:null,mounts:[],devices:{},streams:[],nextInode:1,nameTable:null,currentPath:"/",initialized:false,ignorePermissions:true,ErrnoError:null,genericErrors:{},filesystems:null,syncFSRequests:0,lookupPath:(path,opts={})=>{path=PATH_FS.resolve(path);if(!path)return{path:"",node:null};var defaults={follow_mount:true,recurse_count:0};opts=Object.assign(defaults,opts);if(opts.recurse_count>8){throw new FS.ErrnoError(32)}var parts=path.split("/").filter(p=>!!p);var current=FS.root;var current_path="/";for(var i=0;i<parts.length;i++){var islast=i===parts.length-1;if(islast&&opts.parent){break}current=FS.lookupNode(current,parts[i]);current_path=PATH.join2(current_path,parts[i]);if(FS.isMountpoint(current)){if(!islast||islast&&opts.follow_mount){current=current.mounted.root}}if(!islast||opts.follow){var count=0;while(FS.isLink(current.mode)){var link=FS.readlink(current_path);current_path=PATH_FS.resolve(PATH.dirname(current_path),link);var lookup=FS.lookupPath(current_path,{recurse_count:opts.recurse_count+1});current=lookup.node;if(count++>40){throw new FS.ErrnoError(32)}}}}return{path:current_path,node:current}},getPath:node=>{var path;while(true){if(FS.isRoot(node)){var mount=node.mount.mountpoint;if(!path)return mount;return mount[mount.length-1]!=="/"?mount+"/"+path:mount+path}path=path?node.name+"/"+path:node.name;node=node.parent}},hashName:(parentid,name)=>{var hash=0;for(var i=0;i<name.length;i++){hash=(hash<<5)-hash+name.charCodeAt(i)|0}return(parentid+hash>>>0)%FS.nameTable.length},hashAddNode:node=>{var hash=FS.hashName(node.parent.id,node.name);node.name_next=FS.nameTable[hash];FS.nameTable[hash]=node},hashRemoveNode:node=>{var hash=FS.hashName(node.parent.id,node.name);if(FS.nameTable[hash]===node){FS.nameTable[hash]=node.name_next}else{var current=FS.nameTable[hash];while(current){if(current.name_next===node){current.name_next=node.name_next;break}current=current.name_next}}},lookupNode:(parent,name)=>{var errCode=FS.mayLookup(parent);if(errCode){throw new FS.ErrnoError(errCode,parent)}var hash=FS.hashName(parent.id,name);for(var node=FS.nameTable[hash];node;node=node.name_next){var nodeName=node.name;if(node.parent.id===parent.id&&nodeName===name){return node}}return FS.lookup(parent,name)},createNode:(parent,name,mode,rdev)=>{var node=new FS.FSNode(parent,name,mode,rdev);FS.hashAddNode(node);return node},destroyNode:node=>{FS.hashRemoveNode(node)},isRoot:node=>{return node===node.parent},isMountpoint:node=>{return!!node.mounted},isFile:mode=>{return(mode&61440)===32768},isDir:mode=>{return(mode&61440)===16384},isLink:mode=>{return(mode&61440)===40960},isChrdev:mode=>{return(mode&61440)===8192},isBlkdev:mode=>{return(mode&61440)===24576},isFIFO:mode=>{return(mode&61440)===4096},isSocket:mode=>{return(mode&49152)===49152},flagModes:{"r":0,"r+":2,"w":577,"w+":578,"a":1089,"a+":1090},modeStringToFlags:str=>{var flags=FS.flagModes[str];if(typeof flags=="undefined"){throw new Error("Unknown file open mode: "+str)}return flags},flagsToPermissionString:flag=>{var perms=["r","w","rw"][flag&3];if(flag&512){perms+="w"}return perms},nodePermissions:(node,perms)=>{if(FS.ignorePermissions){return 0}if(perms.includes("r")&&!(node.mode&292)){return 2}else if(perms.includes("w")&&!(node.mode&146)){return 2}else if(perms.includes("x")&&!(node.mode&73)){return 2}return 0},mayLookup:dir=>{var errCode=FS.nodePermissions(dir,"x");if(errCode)return errCode;if(!dir.node_ops.lookup)return 2;return 0},mayCreate:(dir,name)=>{try{var node=FS.lookupNode(dir,name);return 20}catch(e){}return FS.nodePermissions(dir,"wx")},mayDelete:(dir,name,isdir)=>{var node;try{node=FS.lookupNode(dir,name)}catch(e){return e.errno}var errCode=FS.nodePermissions(dir,"wx");if(errCode){return errCode}if(isdir){if(!FS.isDir(node.mode)){return 54}if(FS.isRoot(node)||FS.getPath(node)===FS.cwd()){return 10}}else{if(FS.isDir(node.mode)){return 31}}return 0},mayOpen:(node,flags)=>{if(!node){return 44}if(FS.isLink(node.mode)){return 32}else if(FS.isDir(node.mode)){if(FS.flagsToPermissionString(flags)!=="r"||flags&512){return 31}}return FS.nodePermissions(node,FS.flagsToPermissionString(flags))},MAX_OPEN_FDS:4096,nextfd:(fd_start=0,fd_end=FS.MAX_OPEN_FDS)=>{for(var fd=fd_start;fd<=fd_end;fd++){if(!FS.streams[fd]){return fd}}throw new FS.ErrnoError(33)},getStream:fd=>FS.streams[fd],createStream:(stream,fd_start,fd_end)=>{if(!FS.FSStream){FS.FSStream=function(){this.shared={}};FS.FSStream.prototype={};Object.defineProperties(FS.FSStream.prototype,{object:{get:function(){return this.node},set:function(val){this.node=val}},isRead:{get:function(){return(this.flags&2097155)!==1}},isWrite:{get:function(){return(this.flags&2097155)!==0}},isAppend:{get:function(){return this.flags&1024}},flags:{get:function(){return this.shared.flags},set:function(val){this.shared.flags=val}},position:{get:function(){return this.shared.position},set:function(val){this.shared.position=val}}})}stream=Object.assign(new FS.FSStream,stream);var fd=FS.nextfd(fd_start,fd_end);stream.fd=fd;FS.streams[fd]=stream;return stream},closeStream:fd=>{FS.streams[fd]=null},chrdev_stream_ops:{open:stream=>{var device=FS.getDevice(stream.node.rdev);stream.stream_ops=device.stream_ops;if(stream.stream_ops.open){stream.stream_ops.open(stream)}},llseek:()=>{throw new FS.ErrnoError(70)}},major:dev=>dev>>8,minor:dev=>dev&255,makedev:(ma,mi)=>ma<<8|mi,registerDevice:(dev,ops)=>{FS.devices[dev]={stream_ops:ops}},getDevice:dev=>FS.devices[dev],getMounts:mount=>{var mounts=[];var check=[mount];while(check.length){var m=check.pop();mounts.push(m);check.push.apply(check,m.mounts)}return mounts},syncfs:(populate,callback)=>{if(typeof populate=="function"){callback=populate;populate=false}FS.syncFSRequests++;if(FS.syncFSRequests>1){err("warning: "+FS.syncFSRequests+" FS.syncfs operations in flight at once, probably just doing extra work")}var mounts=FS.getMounts(FS.root.mount);var completed=0;function doCallback(errCode){FS.syncFSRequests--;return callback(errCode)}function done(errCode){if(errCode){if(!done.errored){done.errored=true;return doCallback(errCode)}return}if(++completed>=mounts.length){doCallback(null)}}mounts.forEach(mount=>{if(!mount.type.syncfs){return done(null)}mount.type.syncfs(mount,populate,done)})},mount:(type,opts,mountpoint)=>{var root=mountpoint==="/";var pseudo=!mountpoint;var node;if(root&&FS.root){throw new FS.ErrnoError(10)}else if(!root&&!pseudo){var lookup=FS.lookupPath(mountpoint,{follow_mount:false});mountpoint=lookup.path;node=lookup.node;if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}if(!FS.isDir(node.mode)){throw new FS.ErrnoError(54)}}var mount={type:type,opts:opts,mountpoint:mountpoint,mounts:[]};var mountRoot=type.mount(mount);mountRoot.mount=mount;mount.root=mountRoot;if(root){FS.root=mountRoot}else if(node){node.mounted=mount;if(node.mount){node.mount.mounts.push(mount)}}return mountRoot},unmount:mountpoint=>{var lookup=FS.lookupPath(mountpoint,{follow_mount:false});if(!FS.isMountpoint(lookup.node)){throw new FS.ErrnoError(28)}var node=lookup.node;var mount=node.mounted;var mounts=FS.getMounts(mount);Object.keys(FS.nameTable).forEach(hash=>{var current=FS.nameTable[hash];while(current){var next=current.name_next;if(mounts.includes(current.mount)){FS.destroyNode(current)}current=next}});node.mounted=null;var idx=node.mount.mounts.indexOf(mount);node.mount.mounts.splice(idx,1)},lookup:(parent,name)=>{return parent.node_ops.lookup(parent,name)},mknod:(path,mode,dev)=>{var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;var name=PATH.basename(path);if(!name||name==="."||name===".."){throw new FS.ErrnoError(28)}var errCode=FS.mayCreate(parent,name);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.mknod){throw new FS.ErrnoError(63)}return parent.node_ops.mknod(parent,name,mode,dev)},create:(path,mode)=>{mode=mode!==undefined?mode:438;mode&=4095;mode|=32768;return FS.mknod(path,mode,0)},mkdir:(path,mode)=>{mode=mode!==undefined?mode:511;mode&=511|512;mode|=16384;return FS.mknod(path,mode,0)},mkdirTree:(path,mode)=>{var dirs=path.split("/");var d="";for(var i=0;i<dirs.length;++i){if(!dirs[i])continue;d+="/"+dirs[i];try{FS.mkdir(d,mode)}catch(e){if(e.errno!=20)throw e}}},mkdev:(path,mode,dev)=>{if(typeof dev=="undefined"){dev=mode;mode=438}mode|=8192;return FS.mknod(path,mode,dev)},symlink:(oldpath,newpath)=>{if(!PATH_FS.resolve(oldpath)){throw new FS.ErrnoError(44)}var lookup=FS.lookupPath(newpath,{parent:true});var parent=lookup.node;if(!parent){throw new FS.ErrnoError(44)}var newname=PATH.basename(newpath);var errCode=FS.mayCreate(parent,newname);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.symlink){throw new FS.ErrnoError(63)}return parent.node_ops.symlink(parent,newname,oldpath)},rename:(old_path,new_path)=>{var old_dirname=PATH.dirname(old_path);var new_dirname=PATH.dirname(new_path);var old_name=PATH.basename(old_path);var new_name=PATH.basename(new_path);var lookup,old_dir,new_dir;lookup=FS.lookupPath(old_path,{parent:true});old_dir=lookup.node;lookup=FS.lookupPath(new_path,{parent:true});new_dir=lookup.node;if(!old_dir||!new_dir)throw new FS.ErrnoError(44);if(old_dir.mount!==new_dir.mount){throw new FS.ErrnoError(75)}var old_node=FS.lookupNode(old_dir,old_name);var relative=PATH_FS.relative(old_path,new_dirname);if(relative.charAt(0)!=="."){throw new FS.ErrnoError(28)}relative=PATH_FS.relative(new_path,old_dirname);if(relative.charAt(0)!=="."){throw new FS.ErrnoError(55)}var new_node;try{new_node=FS.lookupNode(new_dir,new_name)}catch(e){}if(old_node===new_node){return}var isdir=FS.isDir(old_node.mode);var errCode=FS.mayDelete(old_dir,old_name,isdir);if(errCode){throw new FS.ErrnoError(errCode)}errCode=new_node?FS.mayDelete(new_dir,new_name,isdir):FS.mayCreate(new_dir,new_name);if(errCode){throw new FS.ErrnoError(errCode)}if(!old_dir.node_ops.rename){throw new FS.ErrnoError(63)}if(FS.isMountpoint(old_node)||new_node&&FS.isMountpoint(new_node)){throw new FS.ErrnoError(10)}if(new_dir!==old_dir){errCode=FS.nodePermissions(old_dir,"w");if(errCode){throw new FS.ErrnoError(errCode)}}FS.hashRemoveNode(old_node);try{old_dir.node_ops.rename(old_node,new_dir,new_name)}catch(e){throw e}finally{FS.hashAddNode(old_node)}},rmdir:path=>{var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;var name=PATH.basename(path);var node=FS.lookupNode(parent,name);var errCode=FS.mayDelete(parent,name,true);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.rmdir){throw new FS.ErrnoError(63)}if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}parent.node_ops.rmdir(parent,name);FS.destroyNode(node)},readdir:path=>{var lookup=FS.lookupPath(path,{follow:true});var node=lookup.node;if(!node.node_ops.readdir){throw new FS.ErrnoError(54)}return node.node_ops.readdir(node)},unlink:path=>{var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;if(!parent){throw new FS.ErrnoError(44)}var name=PATH.basename(path);var node=FS.lookupNode(parent,name);var errCode=FS.mayDelete(parent,name,false);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.unlink){throw new FS.ErrnoError(63)}if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}parent.node_ops.unlink(parent,name);FS.destroyNode(node)},readlink:path=>{var lookup=FS.lookupPath(path);var link=lookup.node;if(!link){throw new FS.ErrnoError(44)}if(!link.node_ops.readlink){throw new FS.ErrnoError(28)}return PATH_FS.resolve(FS.getPath(link.parent),link.node_ops.readlink(link))},stat:(path,dontFollow)=>{var lookup=FS.lookupPath(path,{follow:!dontFollow});var node=lookup.node;if(!node){throw new FS.ErrnoError(44)}if(!node.node_ops.getattr){throw new FS.ErrnoError(63)}return node.node_ops.getattr(node)},lstat:path=>{return FS.stat(path,true)},chmod:(path,mode,dontFollow)=>{var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:!dontFollow});node=lookup.node}else{node=path}if(!node.node_ops.setattr){throw new FS.ErrnoError(63)}node.node_ops.setattr(node,{mode:mode&4095|node.mode&~4095,timestamp:Date.now()})},lchmod:(path,mode)=>{FS.chmod(path,mode,true)},fchmod:(fd,mode)=>{var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}FS.chmod(stream.node,mode)},chown:(path,uid,gid,dontFollow)=>{var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:!dontFollow});node=lookup.node}else{node=path}if(!node.node_ops.setattr){throw new FS.ErrnoError(63)}node.node_ops.setattr(node,{timestamp:Date.now()})},lchown:(path,uid,gid)=>{FS.chown(path,uid,gid,true)},fchown:(fd,uid,gid)=>{var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}FS.chown(stream.node,uid,gid)},truncate:(path,len)=>{if(len<0){throw new FS.ErrnoError(28)}var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:true});node=lookup.node}else{node=path}if(!node.node_ops.setattr){throw new FS.ErrnoError(63)}if(FS.isDir(node.mode)){throw new FS.ErrnoError(31)}if(!FS.isFile(node.mode)){throw new FS.ErrnoError(28)}var errCode=FS.nodePermissions(node,"w");if(errCode){throw new FS.ErrnoError(errCode)}node.node_ops.setattr(node,{size:len,timestamp:Date.now()})},ftruncate:(fd,len)=>{var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(28)}FS.truncate(stream.node,len)},utime:(path,atime,mtime)=>{var lookup=FS.lookupPath(path,{follow:true});var node=lookup.node;node.node_ops.setattr(node,{timestamp:Math.max(atime,mtime)})},open:(path,flags,mode)=>{if(path===""){throw new FS.ErrnoError(44)}flags=typeof flags=="string"?FS.modeStringToFlags(flags):flags;mode=typeof mode=="undefined"?438:mode;if(flags&64){mode=mode&4095|32768}else{mode=0}var node;if(typeof path=="object"){node=path}else{path=PATH.normalize(path);try{var lookup=FS.lookupPath(path,{follow:!(flags&131072)});node=lookup.node}catch(e){}}var created=false;if(flags&64){if(node){if(flags&128){throw new FS.ErrnoError(20)}}else{node=FS.mknod(path,mode,0);created=true}}if(!node){throw new FS.ErrnoError(44)}if(FS.isChrdev(node.mode)){flags&=~512}if(flags&65536&&!FS.isDir(node.mode)){throw new FS.ErrnoError(54)}if(!created){var errCode=FS.mayOpen(node,flags);if(errCode){throw new FS.ErrnoError(errCode)}}if(flags&512&&!created){FS.truncate(node,0)}flags&=~(128|512|131072);var stream=FS.createStream({node:node,path:FS.getPath(node),flags:flags,seekable:true,position:0,stream_ops:node.stream_ops,ungotten:[],error:false});if(stream.stream_ops.open){stream.stream_ops.open(stream)}if(Module["logReadFiles"]&&!(flags&1)){if(!FS.readFiles)FS.readFiles={};if(!(path in FS.readFiles)){FS.readFiles[path]=1}}return stream},close:stream=>{if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(stream.getdents)stream.getdents=null;try{if(stream.stream_ops.close){stream.stream_ops.close(stream)}}catch(e){throw e}finally{FS.closeStream(stream.fd)}stream.fd=null},isClosed:stream=>{return stream.fd===null},llseek:(stream,offset,whence)=>{if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(!stream.seekable||!stream.stream_ops.llseek){throw new FS.ErrnoError(70)}if(whence!=0&&whence!=1&&whence!=2){throw new FS.ErrnoError(28)}stream.position=stream.stream_ops.llseek(stream,offset,whence);stream.ungotten=[];return stream.position},read:(stream,buffer,offset,length,position)=>{if(length<0||position<0){throw new FS.ErrnoError(28)}if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===1){throw new FS.ErrnoError(8)}if(FS.isDir(stream.node.mode)){throw new FS.ErrnoError(31)}if(!stream.stream_ops.read){throw new FS.ErrnoError(28)}var seeking=typeof position!="undefined";if(!seeking){position=stream.position}else if(!stream.seekable){throw new FS.ErrnoError(70)}var bytesRead=stream.stream_ops.read(stream,buffer,offset,length,position);if(!seeking)stream.position+=bytesRead;return bytesRead},write:(stream,buffer,offset,length,position,canOwn)=>{if(length<0||position<0){throw new FS.ErrnoError(28)}if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(8)}if(FS.isDir(stream.node.mode)){throw new FS.ErrnoError(31)}if(!stream.stream_ops.write){throw new FS.ErrnoError(28)}if(stream.seekable&&stream.flags&1024){FS.llseek(stream,0,2)}var seeking=typeof position!="undefined";if(!seeking){position=stream.position}else if(!stream.seekable){throw new FS.ErrnoError(70)}var bytesWritten=stream.stream_ops.write(stream,buffer,offset,length,position,canOwn);if(!seeking)stream.position+=bytesWritten;return bytesWritten},allocate:(stream,offset,length)=>{if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(offset<0||length<=0){throw new FS.ErrnoError(28)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(8)}if(!FS.isFile(stream.node.mode)&&!FS.isDir(stream.node.mode)){throw new FS.ErrnoError(43)}if(!stream.stream_ops.allocate){throw new FS.ErrnoError(138)}stream.stream_ops.allocate(stream,offset,length)},mmap:(stream,length,position,prot,flags)=>{if((prot&2)!==0&&(flags&2)===0&&(stream.flags&2097155)!==2){throw new FS.ErrnoError(2)}if((stream.flags&2097155)===1){throw new FS.ErrnoError(2)}if(!stream.stream_ops.mmap){throw new FS.ErrnoError(43)}return stream.stream_ops.mmap(stream,length,position,prot,flags)},msync:(stream,buffer,offset,length,mmapFlags)=>{if(!stream.stream_ops.msync){return 0}return stream.stream_ops.msync(stream,buffer,offset,length,mmapFlags)},munmap:stream=>0,ioctl:(stream,cmd,arg)=>{if(!stream.stream_ops.ioctl){throw new FS.ErrnoError(59)}return stream.stream_ops.ioctl(stream,cmd,arg)},readFile:(path,opts={})=>{opts.flags=opts.flags||0;opts.encoding=opts.encoding||"binary";if(opts.encoding!=="utf8"&&opts.encoding!=="binary"){throw new Error('Invalid encoding type "'+opts.encoding+'"')}var ret;var stream=FS.open(path,opts.flags);var stat=FS.stat(path);var length=stat.size;var buf=new Uint8Array(length);FS.read(stream,buf,0,length,0);if(opts.encoding==="utf8"){ret=UTF8ArrayToString(buf,0)}else if(opts.encoding==="binary"){ret=buf}FS.close(stream);return ret},writeFile:(path,data,opts={})=>{opts.flags=opts.flags||577;var stream=FS.open(path,opts.flags,opts.mode);if(typeof data=="string"){var buf=new Uint8Array(lengthBytesUTF8(data)+1);var actualNumBytes=stringToUTF8Array(data,buf,0,buf.length);FS.write(stream,buf,0,actualNumBytes,undefined,opts.canOwn)}else if(ArrayBuffer.isView(data)){FS.write(stream,data,0,data.byteLength,undefined,opts.canOwn)}else{throw new Error("Unsupported data type")}FS.close(stream)},cwd:()=>FS.currentPath,chdir:path=>{var lookup=FS.lookupPath(path,{follow:true});if(lookup.node===null){throw new FS.ErrnoError(44)}if(!FS.isDir(lookup.node.mode)){throw new FS.ErrnoError(54)}var errCode=FS.nodePermissions(lookup.node,"x");if(errCode){throw new FS.ErrnoError(errCode)}FS.currentPath=lookup.path},createDefaultDirectories:()=>{FS.mkdir("/tmp");FS.mkdir("/home");FS.mkdir("/home/web_user")},createDefaultDevices:()=>{FS.mkdir("/dev");FS.registerDevice(FS.makedev(1,3),{read:()=>0,write:(stream,buffer,offset,length,pos)=>length});FS.mkdev("/dev/null",FS.makedev(1,3));TTY.register(FS.makedev(5,0),TTY.default_tty_ops);TTY.register(FS.makedev(6,0),TTY.default_tty1_ops);FS.mkdev("/dev/tty",FS.makedev(5,0));FS.mkdev("/dev/tty1",FS.makedev(6,0));var randomBuffer=new Uint8Array(1024),randomLeft=0;var randomByte=()=>{if(randomLeft===0){randomLeft=randomFill(randomBuffer).byteLength}return randomBuffer[--randomLeft]};FS.createDevice("/dev","random",randomByte);FS.createDevice("/dev","urandom",randomByte);FS.mkdir("/dev/shm");FS.mkdir("/dev/shm/tmp")},createSpecialDirectories:()=>{FS.mkdir("/proc");var proc_self=FS.mkdir("/proc/self");FS.mkdir("/proc/self/fd");FS.mount({mount:()=>{var node=FS.createNode(proc_self,"fd",16384|511,73);node.node_ops={lookup:(parent,name)=>{var fd=+name;var stream=FS.getStream(fd);if(!stream)throw new FS.ErrnoError(8);var ret={parent:null,mount:{mountpoint:"fake"},node_ops:{readlink:()=>stream.path}};ret.parent=ret;return ret}};return node}},{},"/proc/self/fd")},createStandardStreams:()=>{if(Module["stdin"]){FS.createDevice("/dev","stdin",Module["stdin"])}else{FS.symlink("/dev/tty","/dev/stdin")}if(Module["stdout"]){FS.createDevice("/dev","stdout",null,Module["stdout"])}else{FS.symlink("/dev/tty","/dev/stdout")}if(Module["stderr"]){FS.createDevice("/dev","stderr",null,Module["stderr"])}else{FS.symlink("/dev/tty1","/dev/stderr")}var stdin=FS.open("/dev/stdin",0);var stdout=FS.open("/dev/stdout",1);var stderr=FS.open("/dev/stderr",1)},ensureErrnoError:()=>{if(FS.ErrnoError)return;FS.ErrnoError=function ErrnoError(errno,node){this.name="ErrnoError";this.node=node;this.setErrno=function(errno){this.errno=errno};this.setErrno(errno);this.message="FS error"};FS.ErrnoError.prototype=new Error;FS.ErrnoError.prototype.constructor=FS.ErrnoError;[44].forEach(code=>{FS.genericErrors[code]=new FS.ErrnoError(code);FS.genericErrors[code].stack="<generic error, no stack>"})},staticInit:()=>{FS.ensureErrnoError();FS.nameTable=new Array(4096);FS.mount(MEMFS,{},"/");FS.createDefaultDirectories();FS.createDefaultDevices();FS.createSpecialDirectories();FS.filesystems={"MEMFS":MEMFS}},init:(input,output,error)=>{FS.init.initialized=true;FS.ensureErrnoError();Module["stdin"]=input||Module["stdin"];Module["stdout"]=output||Module["stdout"];Module["stderr"]=error||Module["stderr"];FS.createStandardStreams()},quit:()=>{FS.init.initialized=false;for(var i=0;i<FS.streams.length;i++){var stream=FS.streams[i];if(!stream){continue}FS.close(stream)}},getMode:(canRead,canWrite)=>{var mode=0;if(canRead)mode|=292|73;if(canWrite)mode|=146;return mode},findObject:(path,dontResolveLastLink)=>{var ret=FS.analyzePath(path,dontResolveLastLink);if(!ret.exists){return null}return ret.object},analyzePath:(path,dontResolveLastLink)=>{try{var lookup=FS.lookupPath(path,{follow:!dontResolveLastLink});path=lookup.path}catch(e){}var ret={isRoot:false,exists:false,error:0,name:null,path:null,object:null,parentExists:false,parentPath:null,parentObject:null};try{var lookup=FS.lookupPath(path,{parent:true});ret.parentExists=true;ret.parentPath=lookup.path;ret.parentObject=lookup.node;ret.name=PATH.basename(path);lookup=FS.lookupPath(path,{follow:!dontResolveLastLink});ret.exists=true;ret.path=lookup.path;ret.object=lookup.node;ret.name=lookup.node.name;ret.isRoot=lookup.path==="/"}catch(e){ret.error=e.errno}return ret},createPath:(parent,path,canRead,canWrite)=>{parent=typeof parent=="string"?parent:FS.getPath(parent);var parts=path.split("/").reverse();while(parts.length){var part=parts.pop();if(!part)continue;var current=PATH.join2(parent,part);try{FS.mkdir(current)}catch(e){}parent=current}return current},createFile:(parent,name,properties,canRead,canWrite)=>{var path=PATH.join2(typeof parent=="string"?parent:FS.getPath(parent),name);var mode=FS.getMode(canRead,canWrite);return FS.create(path,mode)},createDataFile:(parent,name,data,canRead,canWrite,canOwn)=>{var path=name;if(parent){parent=typeof parent=="string"?parent:FS.getPath(parent);path=name?PATH.join2(parent,name):parent}var mode=FS.getMode(canRead,canWrite);var node=FS.create(path,mode);if(data){if(typeof data=="string"){var arr=new Array(data.length);for(var i=0,len=data.length;i<len;++i)arr[i]=data.charCodeAt(i);data=arr}FS.chmod(node,mode|146);var stream=FS.open(node,577);FS.write(stream,data,0,data.length,0,canOwn);FS.close(stream);FS.chmod(node,mode)}return node},createDevice:(parent,name,input,output)=>{var path=PATH.join2(typeof parent=="string"?parent:FS.getPath(parent),name);var mode=FS.getMode(!!input,!!output);if(!FS.createDevice.major)FS.createDevice.major=64;var dev=FS.makedev(FS.createDevice.major++,0);FS.registerDevice(dev,{open:stream=>{stream.seekable=false},close:stream=>{if(output&&output.buffer&&output.buffer.length){output(10)}},read:(stream,buffer,offset,length,pos)=>{var bytesRead=0;for(var i=0;i<length;i++){var result;try{result=input()}catch(e){throw new FS.ErrnoError(29)}if(result===undefined&&bytesRead===0){throw new FS.ErrnoError(6)}if(result===null||result===undefined)break;bytesRead++;buffer[offset+i]=result}if(bytesRead){stream.node.timestamp=Date.now()}return bytesRead},write:(stream,buffer,offset,length,pos)=>{for(var i=0;i<length;i++){try{output(buffer[offset+i])}catch(e){throw new FS.ErrnoError(29)}}if(length){stream.node.timestamp=Date.now()}return i}});return FS.mkdev(path,mode,dev)},forceLoadFile:obj=>{if(obj.isDevice||obj.isFolder||obj.link||obj.contents)return true;if(typeof XMLHttpRequest!="undefined"){throw new Error("Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.")}else if(read_){try{obj.contents=intArrayFromString(read_(obj.url),true);obj.usedBytes=obj.contents.length}catch(e){throw new FS.ErrnoError(29)}}else{throw new Error("Cannot load without read() or XMLHttpRequest.")}},createLazyFile:(parent,name,url,canRead,canWrite)=>{function LazyUint8Array(){this.lengthKnown=false;this.chunks=[]}LazyUint8Array.prototype.get=function LazyUint8Array_get(idx){if(idx>this.length-1||idx<0){return undefined}var chunkOffset=idx%this.chunkSize;var chunkNum=idx/this.chunkSize|0;return this.getter(chunkNum)[chunkOffset]};LazyUint8Array.prototype.setDataGetter=function LazyUint8Array_setDataGetter(getter){this.getter=getter};LazyUint8Array.prototype.cacheLength=function LazyUint8Array_cacheLength(){var xhr=new XMLHttpRequest;xhr.open("HEAD",url,false);xhr.send(null);if(!(xhr.status>=200&&xhr.status<300||xhr.status===304))throw new Error("Couldn't load "+url+". Status: "+xhr.status);var datalength=Number(xhr.getResponseHeader("Content-length"));var header;var hasByteServing=(header=xhr.getResponseHeader("Accept-Ranges"))&&header==="bytes";var usesGzip=(header=xhr.getResponseHeader("Content-Encoding"))&&header==="gzip";var chunkSize=1024*1024;if(!hasByteServing)chunkSize=datalength;var doXHR=(from,to)=>{if(from>to)throw new Error("invalid range ("+from+", "+to+") or no bytes requested!");if(to>datalength-1)throw new Error("only "+datalength+" bytes available! programmer error!");var xhr=new XMLHttpRequest;xhr.open("GET",url,false);if(datalength!==chunkSize)xhr.setRequestHeader("Range","bytes="+from+"-"+to);xhr.responseType="arraybuffer";if(xhr.overrideMimeType){xhr.overrideMimeType("text/plain; charset=x-user-defined")}xhr.send(null);if(!(xhr.status>=200&&xhr.status<300||xhr.status===304))throw new Error("Couldn't load "+url+". Status: "+xhr.status);if(xhr.response!==undefined){return new Uint8Array(xhr.response||[])}return intArrayFromString(xhr.responseText||"",true)};var lazyArray=this;lazyArray.setDataGetter(chunkNum=>{var start=chunkNum*chunkSize;var end=(chunkNum+1)*chunkSize-1;end=Math.min(end,datalength-1);if(typeof lazyArray.chunks[chunkNum]=="undefined"){lazyArray.chunks[chunkNum]=doXHR(start,end)}if(typeof lazyArray.chunks[chunkNum]=="undefined")throw new Error("doXHR failed!");return lazyArray.chunks[chunkNum]});if(usesGzip||!datalength){chunkSize=datalength=1;datalength=this.getter(0).length;chunkSize=datalength;out("LazyFiles on gzip forces download of the whole file when length is accessed")}this._length=datalength;this._chunkSize=chunkSize;this.lengthKnown=true};if(typeof XMLHttpRequest!="undefined"){if(!ENVIRONMENT_IS_WORKER)throw"Cannot do synchronous binary XHRs outside webworkers in modern browsers. Use --embed-file or --preload-file in emcc";var lazyArray=new LazyUint8Array;Object.defineProperties(lazyArray,{length:{get:function(){if(!this.lengthKnown){this.cacheLength()}return this._length}},chunkSize:{get:function(){if(!this.lengthKnown){this.cacheLength()}return this._chunkSize}}});var properties={isDevice:false,contents:lazyArray}}else{var properties={isDevice:false,url:url}}var node=FS.createFile(parent,name,properties,canRead,canWrite);if(properties.contents){node.contents=properties.contents}else if(properties.url){node.contents=null;node.url=properties.url}Object.defineProperties(node,{usedBytes:{get:function(){return this.contents.length}}});var stream_ops={};var keys=Object.keys(node.stream_ops);keys.forEach(key=>{var fn=node.stream_ops[key];stream_ops[key]=function forceLoadLazyFile(){FS.forceLoadFile(node);return fn.apply(null,arguments)}});function writeChunks(stream,buffer,offset,length,position){var contents=stream.node.contents;if(position>=contents.length)return 0;var size=Math.min(contents.length-position,length);if(contents.slice){for(var i=0;i<size;i++){buffer[offset+i]=contents[position+i]}}else{for(var i=0;i<size;i++){buffer[offset+i]=contents.get(position+i)}}return size}stream_ops.read=(stream,buffer,offset,length,position)=>{FS.forceLoadFile(node);return writeChunks(stream,buffer,offset,length,position)};stream_ops.mmap=(stream,length,position,prot,flags)=>{FS.forceLoadFile(node);var ptr=mmapAlloc(length);if(!ptr){throw new FS.ErrnoError(48)}writeChunks(stream,HEAP8,ptr,length,position);return{ptr:ptr,allocated:true}};node.stream_ops=stream_ops;return node},createPreloadedFile:(parent,name,url,canRead,canWrite,onload,onerror,dontCreateFile,canOwn,preFinish)=>{var fullname=name?PATH_FS.resolve(PATH.join2(parent,name)):parent;var dep=getUniqueRunDependency("cp "+fullname);function processData(byteArray){function finish(byteArray){if(preFinish)preFinish();if(!dontCreateFile){FS.createDataFile(parent,name,byteArray,canRead,canWrite,canOwn)}if(onload)onload();removeRunDependency(dep)}if(Browser.handledByPreloadPlugin(byteArray,fullname,finish,()=>{if(onerror)onerror();removeRunDependency(dep)})){return}finish(byteArray)}addRunDependency(dep);if(typeof url=="string"){asyncLoad(url,byteArray=>processData(byteArray),onerror)}else{processData(url)}}};var UTF8Decoder=typeof TextDecoder!="undefined"?new TextDecoder("utf8"):undefined;function UTF8ArrayToString(heapOrArray,idx,maxBytesToRead){var endIdx=idx+maxBytesToRead;var endPtr=idx;while(heapOrArray[endPtr]&&!(endPtr>=endIdx))++endPtr;if(endPtr-idx>16&&heapOrArray.buffer&&UTF8Decoder){return UTF8Decoder.decode(heapOrArray.subarray(idx,endPtr))}var str="";while(idx<endPtr){var u0=heapOrArray[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heapOrArray[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heapOrArray[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2}else{u0=(u0&7)<<18|u1<<12|u2<<6|heapOrArray[idx++]&63}if(u0<65536){str+=String.fromCharCode(u0)}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023)}}return str}function UTF8ToString(ptr,maxBytesToRead){return ptr?UTF8ArrayToString(HEAPU8,ptr,maxBytesToRead):""}var SYSCALLS={DEFAULT_POLLMASK:5,calculateAt:function(dirfd,path,allowEmpty){if(PATH.isAbs(path)){return path}var dir;if(dirfd===-100){dir=FS.cwd()}else{var dirstream=SYSCALLS.getStreamFromFD(dirfd);dir=dirstream.path}if(path.length==0){if(!allowEmpty){throw new FS.ErrnoError(44)}return dir}return PATH.join2(dir,path)},doStat:function(func,path,buf){try{var stat=func(path)}catch(e){if(e&&e.node&&PATH.normalize(path)!==PATH.normalize(FS.getPath(e.node))){return-54}throw e}HEAP32[buf>>2]=stat.dev;HEAP32[buf+8>>2]=stat.ino;HEAP32[buf+12>>2]=stat.mode;HEAPU32[buf+16>>2]=stat.nlink;HEAP32[buf+20>>2]=stat.uid;HEAP32[buf+24>>2]=stat.gid;HEAP32[buf+28>>2]=stat.rdev;tempI64=[stat.size>>>0,(tempDouble=stat.size,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+40>>2]=tempI64[0],HEAP32[buf+44>>2]=tempI64[1];HEAP32[buf+48>>2]=4096;HEAP32[buf+52>>2]=stat.blocks;var atime=stat.atime.getTime();var mtime=stat.mtime.getTime();var ctime=stat.ctime.getTime();tempI64=[Math.floor(atime/1e3)>>>0,(tempDouble=Math.floor(atime/1e3),+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+56>>2]=tempI64[0],HEAP32[buf+60>>2]=tempI64[1];HEAPU32[buf+64>>2]=atime%1e3*1e3;tempI64=[Math.floor(mtime/1e3)>>>0,(tempDouble=Math.floor(mtime/1e3),+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+72>>2]=tempI64[0],HEAP32[buf+76>>2]=tempI64[1];HEAPU32[buf+80>>2]=mtime%1e3*1e3;tempI64=[Math.floor(ctime/1e3)>>>0,(tempDouble=Math.floor(ctime/1e3),+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+88>>2]=tempI64[0],HEAP32[buf+92>>2]=tempI64[1];HEAPU32[buf+96>>2]=ctime%1e3*1e3;tempI64=[stat.ino>>>0,(tempDouble=stat.ino,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+104>>2]=tempI64[0],HEAP32[buf+108>>2]=tempI64[1];return 0},doMsync:function(addr,stream,len,flags,offset){if(!FS.isFile(stream.node.mode)){throw new FS.ErrnoError(43)}if(flags&2){return 0}var buffer=HEAPU8.slice(addr,addr+len);FS.msync(stream,buffer,offset,len,flags)},varargs:undefined,get:function(){SYSCALLS.varargs+=4;var ret=HEAP32[SYSCALLS.varargs-4>>2];return ret},getStr:function(ptr){var ret=UTF8ToString(ptr);return ret},getStreamFromFD:function(fd){var stream=FS.getStream(fd);if(!stream)throw new FS.ErrnoError(8);return stream}};function _environ_get(__environ,environ_buf){var bufSize=0;getEnvStrings().forEach(function(string,i){var ptr=environ_buf+bufSize;HEAPU32[__environ+i*4>>2]=ptr;stringToAscii(string,ptr);bufSize+=string.length+1});return 0}function _environ_sizes_get(penviron_count,penviron_buf_size){var strings=getEnvStrings();HEAPU32[penviron_count>>2]=strings.length;var bufSize=0;strings.forEach(function(string){bufSize+=string.length+1});HEAPU32[penviron_buf_size>>2]=bufSize;return 0}function _fd_close(fd){try{var stream=SYSCALLS.getStreamFromFD(fd);FS.close(stream);return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function doReadv(stream,iov,iovcnt,offset){var ret=0;for(var i=0;i<iovcnt;i++){var ptr=HEAPU32[iov>>2];var len=HEAPU32[iov+4>>2];iov+=8;var curr=FS.read(stream,HEAP8,ptr,len,offset);if(curr<0)return-1;ret+=curr;if(curr<len)break;if(typeof offset!=="undefined"){offset+=curr}}return ret}function _fd_read(fd,iov,iovcnt,pnum){try{var stream=SYSCALLS.getStreamFromFD(fd);var num=doReadv(stream,iov,iovcnt);HEAPU32[pnum>>2]=num;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}var MAX_INT53=9007199254740992;var MIN_INT53=-9007199254740992;function bigintToI53Checked(num){return num<MIN_INT53||num>MAX_INT53?NaN:Number(num)}function _fd_seek(fd,offset,whence,newOffset){try{offset=bigintToI53Checked(offset);if(isNaN(offset))return 61;var stream=SYSCALLS.getStreamFromFD(fd);FS.llseek(stream,offset,whence);tempI64=[stream.position>>>0,(tempDouble=stream.position,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[newOffset>>2]=tempI64[0],HEAP32[newOffset+4>>2]=tempI64[1];if(stream.getdents&&offset===0&&whence===0)stream.getdents=null;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function doWritev(stream,iov,iovcnt,offset){var ret=0;for(var i=0;i<iovcnt;i++){var ptr=HEAPU32[iov>>2];var len=HEAPU32[iov+4>>2];iov+=8;var curr=FS.write(stream,HEAP8,ptr,len,offset);if(curr<0)return-1;ret+=curr;if(typeof offset!=="undefined"){offset+=curr}}return ret}function _fd_write(fd,iov,iovcnt,pnum){try{var stream=SYSCALLS.getStreamFromFD(fd);var num=doWritev(stream,iov,iovcnt);HEAPU32[pnum>>2]=num;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function isLeapYear(year){return year%4===0&&(year%100!==0||year%400===0)}function arraySum(array,index){var sum=0;for(var i=0;i<=index;sum+=array[i++]){}return sum}var MONTH_DAYS_LEAP=[31,29,31,30,31,30,31,31,30,31,30,31];var MONTH_DAYS_REGULAR=[31,28,31,30,31,30,31,31,30,31,30,31];function addDays(date,days){var newDate=new Date(date.getTime());while(days>0){var leap=isLeapYear(newDate.getFullYear());var currentMonth=newDate.getMonth();var daysInCurrentMonth=(leap?MONTH_DAYS_LEAP:MONTH_DAYS_REGULAR)[currentMonth];if(days>daysInCurrentMonth-newDate.getDate()){days-=daysInCurrentMonth-newDate.getDate()+1;newDate.setDate(1);if(currentMonth<11){newDate.setMonth(currentMonth+1)}else{newDate.setMonth(0);newDate.setFullYear(newDate.getFullYear()+1)}}else{newDate.setDate(newDate.getDate()+days);return newDate}}return newDate}function writeArrayToMemory(array,buffer){HEAP8.set(array,buffer)}function _strftime(s,maxsize,format,tm){var tm_zone=HEAP32[tm+40>>2];var date={tm_sec:HEAP32[tm>>2],tm_min:HEAP32[tm+4>>2],tm_hour:HEAP32[tm+8>>2],tm_mday:HEAP32[tm+12>>2],tm_mon:HEAP32[tm+16>>2],tm_year:HEAP32[tm+20>>2],tm_wday:HEAP32[tm+24>>2],tm_yday:HEAP32[tm+28>>2],tm_isdst:HEAP32[tm+32>>2],tm_gmtoff:HEAP32[tm+36>>2],tm_zone:tm_zone?UTF8ToString(tm_zone):""};var pattern=UTF8ToString(format);var EXPANSION_RULES_1={"%c":"%a %b %d %H:%M:%S %Y","%D":"%m/%d/%y","%F":"%Y-%m-%d","%h":"%b","%r":"%I:%M:%S %p","%R":"%H:%M","%T":"%H:%M:%S","%x":"%m/%d/%y","%X":"%H:%M:%S","%Ec":"%c","%EC":"%C","%Ex":"%m/%d/%y","%EX":"%H:%M:%S","%Ey":"%y","%EY":"%Y","%Od":"%d","%Oe":"%e","%OH":"%H","%OI":"%I","%Om":"%m","%OM":"%M","%OS":"%S","%Ou":"%u","%OU":"%U","%OV":"%V","%Ow":"%w","%OW":"%W","%Oy":"%y"};for(var rule in EXPANSION_RULES_1){pattern=pattern.replace(new RegExp(rule,"g"),EXPANSION_RULES_1[rule])}var WEEKDAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];var MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];function leadingSomething(value,digits,character){var str=typeof value=="number"?value.toString():value||"";while(str.length<digits){str=character[0]+str}return str}function leadingNulls(value,digits){return leadingSomething(value,digits,"0")}function compareByDay(date1,date2){function sgn(value){return value<0?-1:value>0?1:0}var compare;if((compare=sgn(date1.getFullYear()-date2.getFullYear()))===0){if((compare=sgn(date1.getMonth()-date2.getMonth()))===0){compare=sgn(date1.getDate()-date2.getDate())}}return compare}function getFirstWeekStartDate(janFourth){switch(janFourth.getDay()){case 0:return new Date(janFourth.getFullYear()-1,11,29);case 1:return janFourth;case 2:return new Date(janFourth.getFullYear(),0,3);case 3:return new Date(janFourth.getFullYear(),0,2);case 4:return new Date(janFourth.getFullYear(),0,1);case 5:return new Date(janFourth.getFullYear()-1,11,31);case 6:return new Date(janFourth.getFullYear()-1,11,30)}}function getWeekBasedYear(date){var thisDate=addDays(new Date(date.tm_year+1900,0,1),date.tm_yday);var janFourthThisYear=new Date(thisDate.getFullYear(),0,4);var janFourthNextYear=new Date(thisDate.getFullYear()+1,0,4);var firstWeekStartThisYear=getFirstWeekStartDate(janFourthThisYear);var firstWeekStartNextYear=getFirstWeekStartDate(janFourthNextYear);if(compareByDay(firstWeekStartThisYear,thisDate)<=0){if(compareByDay(firstWeekStartNextYear,thisDate)<=0){return thisDate.getFullYear()+1}return thisDate.getFullYear()}return thisDate.getFullYear()-1}var EXPANSION_RULES_2={"%a":function(date){return WEEKDAYS[date.tm_wday].substring(0,3)},"%A":function(date){return WEEKDAYS[date.tm_wday]},"%b":function(date){return MONTHS[date.tm_mon].substring(0,3)},"%B":function(date){return MONTHS[date.tm_mon]},"%C":function(date){var year=date.tm_year+1900;return leadingNulls(year/100|0,2)},"%d":function(date){return leadingNulls(date.tm_mday,2)},"%e":function(date){return leadingSomething(date.tm_mday,2," ")},"%g":function(date){return getWeekBasedYear(date).toString().substring(2)},"%G":function(date){return getWeekBasedYear(date)},"%H":function(date){return leadingNulls(date.tm_hour,2)},"%I":function(date){var twelveHour=date.tm_hour;if(twelveHour==0)twelveHour=12;else if(twelveHour>12)twelveHour-=12;return leadingNulls(twelveHour,2)},"%j":function(date){return leadingNulls(date.tm_mday+arraySum(isLeapYear(date.tm_year+1900)?MONTH_DAYS_LEAP:MONTH_DAYS_REGULAR,date.tm_mon-1),3)},"%m":function(date){return leadingNulls(date.tm_mon+1,2)},"%M":function(date){return leadingNulls(date.tm_min,2)},"%n":function(){return"\n"},"%p":function(date){if(date.tm_hour>=0&&date.tm_hour<12){return"AM"}return"PM"},"%S":function(date){return leadingNulls(date.tm_sec,2)},"%t":function(){return"\t"},"%u":function(date){return date.tm_wday||7},"%U":function(date){var days=date.tm_yday+7-date.tm_wday;return leadingNulls(Math.floor(days/7),2)},"%V":function(date){var val=Math.floor((date.tm_yday+7-(date.tm_wday+6)%7)/7);if((date.tm_wday+371-date.tm_yday-2)%7<=2){val++}if(!val){val=52;var dec31=(date.tm_wday+7-date.tm_yday-1)%7;if(dec31==4||dec31==5&&isLeapYear(date.tm_year%400-1)){val++}}else if(val==53){var jan1=(date.tm_wday+371-date.tm_yday)%7;if(jan1!=4&&(jan1!=3||!isLeapYear(date.tm_year)))val=1}return leadingNulls(val,2)},"%w":function(date){return date.tm_wday},"%W":function(date){var days=date.tm_yday+7-(date.tm_wday+6)%7;return leadingNulls(Math.floor(days/7),2)},"%y":function(date){return(date.tm_year+1900).toString().substring(2)},"%Y":function(date){return date.tm_year+1900},"%z":function(date){var off=date.tm_gmtoff;var ahead=off>=0;off=Math.abs(off)/60;off=off/60*100+off%60;return(ahead?"+":"-")+String("0000"+off).slice(-4)},"%Z":function(date){return date.tm_zone},"%%":function(){return"%"}};pattern=pattern.replace(/%%/g,"\0\0");for(var rule in EXPANSION_RULES_2){if(pattern.includes(rule)){pattern=pattern.replace(new RegExp(rule,"g"),EXPANSION_RULES_2[rule](date))}}pattern=pattern.replace(/\0\0/g,"%");var bytes=intArrayFromString(pattern,false);if(bytes.length>maxsize){return 0}writeArrayToMemory(bytes,s);return bytes.length-1}function _strftime_l(s,maxsize,format,tm,loc){return _strftime(s,maxsize,format,tm)}function _proc_exit(code){EXITSTATUS=code;if(!keepRuntimeAlive()){if(Module["onExit"])Module["onExit"](code);ABORT=true}quit_(code,new ExitStatus(code))}function exitJS(status,implicit){EXITSTATUS=status;_proc_exit(status)}function handleException(e){if(e instanceof ExitStatus||e=="unwind"){return EXITSTATUS}quit_(1,e)}function getCFunc(ident){var func=Module["_"+ident];return func}function stringToUTF8(str,outPtr,maxBytesToWrite){return stringToUTF8Array(str,HEAPU8,outPtr,maxBytesToWrite)}function stringToUTF8OnStack(str){var size=lengthBytesUTF8(str)+1;var ret=stackAlloc(size);stringToUTF8(str,ret,size);return ret}function ccall(ident,returnType,argTypes,args,opts){var toC={"string":str=>{var ret=0;if(str!==null&&str!==undefined&&str!==0){ret=stringToUTF8OnStack(str)}return ret},"array":arr=>{var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string"){return UTF8ToString(ret)}if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i])}else{cArgs[i]=args[i]}}}var ret=func.apply(null,cArgs);function onDone(ret){if(stack!==0)stackRestore(stack);return convertReturnValue(ret)}ret=onDone(ret);return ret}function cwrap(ident,returnType,argTypes,opts){var numericArgs=!argTypes||argTypes.every(type=>type==="number"||type==="boolean");var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return function(){return ccall(ident,returnType,argTypes,arguments,opts)}}function uleb128Encode(n,target){if(n<128){target.push(n)}else{target.push(n%128|128,n>>7)}}function sigToWasmTypes(sig){var typeNames={"i":"i32","j":"i32","f":"f32","d":"f64","p":"i32"};var type={parameters:[],results:sig[0]=="v"?[]:[typeNames[sig[0]]]};for(var i=1;i<sig.length;++i){type.parameters.push(typeNames[sig[i]]);if(sig[i]==="j"){type.parameters.push("i32")}}return type}function generateFuncType(sig,target){var sigRet=sig.slice(0,1);var sigParam=sig.slice(1);var typeCodes={"i":127,"p":127,"j":126,"f":125,"d":124};target.push(96);uleb128Encode(sigParam.length,target);for(var i=0;i<sigParam.length;++i){target.push(typeCodes[sigParam[i]])}if(sigRet=="v"){target.push(0)}else{target.push(1,typeCodes[sigRet])}}function convertJsFunctionToWasm(func,sig){if(typeof WebAssembly.Function=="function"){return new WebAssembly.Function(sigToWasmTypes(sig),func)}var typeSectionBody=[1];generateFuncType(sig,typeSectionBody);var bytes=[0,97,115,109,1,0,0,0,1];uleb128Encode(typeSectionBody.length,bytes);bytes.push.apply(bytes,typeSectionBody);bytes.push(2,7,1,1,101,1,102,0,0,7,5,1,1,102,0,0);var module=new WebAssembly.Module(new Uint8Array(bytes));var instance=new WebAssembly.Instance(module,{"e":{"f":func}});var wrappedFunc=instance.exports["f"];return wrappedFunc}function getWasmTableEntry(funcPtr){return wasmTable.get(funcPtr)}function updateTableMap(offset,count){if(functionsInTableMap){for(var i=offset;i<offset+count;i++){var item=getWasmTableEntry(i);if(item){functionsInTableMap.set(item,i)}}}}var functionsInTableMap=undefined;function getFunctionAddress(func){if(!functionsInTableMap){functionsInTableMap=new WeakMap;updateTableMap(0,wasmTable.length)}return functionsInTableMap.get(func)||0}var freeTableIndexes=[];function getEmptyTableSlot(){if(freeTableIndexes.length){return freeTableIndexes.pop()}try{wasmTable.grow(1)}catch(err){if(!(err instanceof RangeError)){throw err}throw"Unable to grow wasm table. Set ALLOW_TABLE_GROWTH."}return wasmTable.length-1}function setWasmTableEntry(idx,func){wasmTable.set(idx,func)}function addFunction(func,sig){var rtn=getFunctionAddress(func);if(rtn){return rtn}var ret=getEmptyTableSlot();try{setWasmTableEntry(ret,func)}catch(err){if(!(err instanceof TypeError)){throw err}var wrapped=convertJsFunctionToWasm(func,sig);setWasmTableEntry(ret,wrapped)}functionsInTableMap.set(func,ret);return ret}var FSNode=function(parent,name,mode,rdev){if(!parent){parent=this}this.parent=parent;this.mount=parent.mount;this.mounted=null;this.id=FS.nextInode++;this.name=name;this.mode=mode;this.node_ops={};this.stream_ops={};this.rdev=rdev};var readMode=292|73;var writeMode=146;Object.defineProperties(FSNode.prototype,{read:{get:function(){return(this.mode&readMode)===readMode},set:function(val){val?this.mode|=readMode:this.mode&=~readMode}},write:{get:function(){return(this.mode&writeMode)===writeMode},set:function(val){val?this.mode|=writeMode:this.mode&=~writeMode}},isFolder:{get:function(){return FS.isDir(this.mode)}},isDevice:{get:function(){return FS.isChrdev(this.mode)}}});FS.FSNode=FSNode;FS.staticInit();var wasmImports={"a":_abort,"j":_emscripten_memcpy_big,"i":_emscripten_resize_heap,"d":_environ_get,"e":_environ_sizes_get,"f":_fd_close,"g":_fd_read,"h":_fd_seek,"b":_fd_write,"c":_strftime_l};var asm=createWasm();var ___wasm_call_ctors=function(){return(___wasm_call_ctors=Module["asm"]["l"]).apply(null,arguments)};var _init=Module["_init"]=function(){return(_init=Module["_init"]=Module["asm"]["m"]).apply(null,arguments)};var _execute=Module["_execute"]=function(){return(_execute=Module["_execute"]=Module["asm"]["n"]).apply(null,arguments)};var _setTrigger=Module["_setTrigger"]=function(){return(_setTrigger=Module["_setTrigger"]=Module["asm"]["o"]).apply(null,arguments)};var _getTime=Module["_getTime"]=function(){return(_getTime=Module["_getTime"]=Module["asm"]["p"]).apply(null,arguments)};var _main=Module["_main"]=function(){return(_main=Module["_main"]=Module["asm"]["q"]).apply(null,arguments)};var ___errno_location=function(){return(___errno_location=Module["asm"]["__errno_location"]).apply(null,arguments)};var stackSave=function(){return(stackSave=Module["asm"]["s"]).apply(null,arguments)};var stackRestore=function(){return(stackRestore=Module["asm"]["t"]).apply(null,arguments)};var stackAlloc=function(){return(stackAlloc=Module["asm"]["u"]).apply(null,arguments)};Module["addOnPostRun"]=addOnPostRun;Module["ccall"]=ccall;Module["cwrap"]=cwrap;Module["addFunction"]=addFunction;Module["setValue"]=setValue;Module["getValue"]=getValue;var calledRun;dependenciesFulfilled=function runCaller(){if(!calledRun)run();if(!calledRun)dependenciesFulfilled=runCaller};function callMain(){var entryFunction=_main;var argc=0;var argv=0;try{var ret=entryFunction(argc,argv);exitJS(ret,true);return ret}catch(e){return handleException(e)}}function run(){if(runDependencies>0){return}preRun();if(runDependencies>0){return}function doRun(){if(calledRun)return;calledRun=true;Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();readyPromiseResolve(Module);if(Module["onRuntimeInitialized"])Module["onRuntimeInitialized"]();if(shouldRunNow)callMain();postRun()}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(function(){setTimeout(function(){Module["setStatus"]("")},1);doRun()},1)}else{doRun()}}if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].pop()()}}var shouldRunNow=true;if(Module["noInitialRun"])shouldRunNow=false;run();
-
-
-  return createVCD.ready
-}
-
-);
-})();
-if (typeof exports === 'object' && typeof module === 'object')
-  module.exports = createVCD;
-else if (typeof define === 'function' && define['amd'])
-  define([], function() { return createVCD; });
-else if (typeof exports === 'object')
-  exports["createVCD"] = createVCD;
-
-}).call(this)}).call(this,require('_process'),require("buffer").Buffer,"/node_modules/vcd-stream/out/vcd.js",arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/vcd-stream/out")
-},{"_process":223,"buffer":136,"crypto":144,"fs":134,"path":216}],72:[function(require,module,exports){
-(function (global){(function (){
-'use strict';
-
-const {StyleModule} = require('style-mod');
-
-const {
-  createCodeMirrorState,
-  mountCodeMirror6
-} = require('waveql');
-
-const createVCD = require('vcd-stream/out/vcd.js');
-const webVcdParser = require('vcd-stream/lib/web-vcd-parser.js');
-const vcdPipeDeso = require('vcd-stream/lib/vcd-pipe-deso.js');
-const getVcd = require('vcd-stream/lib/get-vcd.js');
-
-const {
-  domContainer,
-  pluginRenderValues,
-  pluginRenderTimeGrid,
-  keyBindo,
-  mountTree,
-  getElement,
-  getListing,
-  // // renderMenu,
-  // // mountCodeMirror5,
-  genKeyHandler,
-  genOnWheel,
-  themeAll,
-  // helpPanel
-} = require('@wavedrom/doppler');
-
-const pkg = require('../package.json');
-
-const loadVCD = async (mod, cnt, initDeso, data, done) => {
-  const inst = await webVcdParser(mod); // VCD parser instance
-  vcdPipeDeso(initDeso, inst, (deso) => {
-    cnt.start(deso);
-    deso.render();
-    console.log('vcdPipeDeso done');
-  });
-  const reader = {
-    ext: 'vcd',
-    baseName: data.name,
-    reader: {
-      read: async () => {
-        return {done: true, value: data.text};
-      }
-    }
-  };
-  await getVcd([reader], {
-    set innerHTML (msg) {
-      console.log(msg);
-    }
-  }, inst);
-  done();
-};
-
-const loadLST = async (deso, data, done) => {
-  const reader = {
-    ext: 'lst',
-    baseName: data.name,
-    reader: {
-      read: async () => {
-        return {done: true, value: data.text};
-      }
-    }
-  };
-  console.log('loadLST reader', reader, data);
-  deso.listing = await getListing([reader]);
-  done();
-};
-
-global.VCDromView = async (divName) => {
-  console.log(pkg.name, pkg.version);
-  const rootDiv = getElement(divName);
-
-  const vscode = acquireVsCodeApi();
-
-  // add all CSS styles
-  StyleModule.mount(document, new StyleModule(Object.assign(themeAll, {
-    '.vcdrombody': themeAll.body,
-  })));
-
-  const cnt1 = domContainer({
-    elemento: mountTree.defaultElemento,
-    layers: mountTree.defaultLayers,
-    renderPlugins: [
-      pluginRenderTimeGrid,
-      pluginRenderValues
-    ]
-  });
-
-  // const elo = mountTree.createElemento(mountTree.defaultElemento);
-  // const container = mountTree.createContainer(elo, mountTree.defaultLayers);
-  rootDiv.innerHTML = '';
-  rootDiv.appendChild(cnt1.pstate.container);
-
-  const updater = (str) => {
-    console.log('updater');
-    deso.waveql = str;
-    vscode.postMessage({
-      kind: 'waveql.update',
-      text: str
-    });
-  };
-
-  const deso = {
-    wires: {body: []},
-    listing: [],
-    render: () => { console.log('dummy render'); },
-    updater
-  };
-
-
-  const cmState = createCodeMirrorState(
-    deso,
-    cnt1.pstate
-  );
-
-  const cm = mountCodeMirror6(
-    cmState,
-    cnt1.elo.waveqlPanel,
-    deso,
-    cnt1.pstate
-  );
-  cnt1.elo.container.addEventListener('keydown', genKeyHandler.genKeyHandler(rootDiv, cnt1.pstate, deso, cm, keyBindo));
-  cnt1.elo.container.addEventListener('wheel', genOnWheel(rootDiv, cnt1.pstate, deso, cm, keyBindo));
-  cm.view.focus();
-
-  const mod = await createVCD();
-  // const vd = await mountWaves(mod, deso, elo, pstate, renderHandler);
-
-  window.addEventListener('message', event => {
-    const {data} = event;
-    switch (data.kind) {
-    case 'loadWaveQL':
-      if (data.text !== deso.waveql) {
-        console.log('loadWaveQL');
-        deso.waveql = data.text;
-        // cnt1.pstate.waveql = data.text;
-        cm.view.dispatch({changes: {
-          from: 0, to: cm.view.state.doc.length, insert: data.text
-        }});
-      }
-      break;
-    case 'loadVCD':
-      loadVCD(mod, cnt1, deso, data, () => {
-        cm.view.dispatch({changes: {
-          from: 0, to: cm.view.state.doc.length, insert: deso.waveql
-        }});
-        // cm.view.dispatch({changes: {from: 0, insert: ' '}});
-        // cm.view.dispatch({changes: {from: 0, to: 1, insert: ''}});
-        // cm.view.setState(createCodeMirrorState(
-        //   deso,
-        //   cnt1.pstate
-        // ));
-        // vscode.postMessage({
-        //   kind: 'loaded'
-        // });
-        console.log('loadVCD done', deso);
+    elo,
+    pstate,
+    start: (deso /* , opt */) => {
+
+      // content.appendChild(container);
+      // content.appendChild(elo.rightPanel);
+      getFullView(deso);
+
+      deso.t0 = deso.t0 || 0;
+      // desc.xScale |= 8;
+
+      Object.assign(pstate, {
+        tgcd: deso.tgcd,
+        timescale: deso.timescale,
+        xScale: deso.xScale || 8,
+        numLanes: deso.view.length,
+        t0: deso.t0,
+        time: deso.time
       });
-      break;
-    case 'loadLST':
-      loadLST(deso, data, () => {
-        cm.view.dispatch({changes: {
-          from: 0, to: cm.view.state.doc.length, insert: deso.waveql
-        }});
-        console.log('loadLST done', deso);
+
+      try {
+        const str = localStorage.getItem('vcdrom');
+        const obj = JSON.parse(str);
+        Object.assign(pstate, obj);
+      } catch(err) {
+        console.error(err);
+      }
+
+      // const {timetopSVG, timebotSVG} = timeline(deso);
+
+      if (deso.timeOpt) {
+        setTime(pstate, deso.timeOpt.value);
+      }
+
+      let render2 = genRenderWavesGL(elo);
+      let render1 = render2(deso);
+      let render = render1(pstate, obj.renderPlugins);
+      deso.render = render;
+
+      const resizeHandler = genResizeHandler(pstate);
+
+      const resizeObserver = new ResizeObserver(entries => {
+        for (let entry of entries) {
+          let {width, height} = entry.contentRect;
+          // height = height || 888;
+          // console.log('resizeObserver', width, height);
+          resizeHandler(width, height);
+        }
+        deso.render();
       });
-      break;
-    default:
-      console.log('-> Client', event);
+
+      resizeObserver.observe(elo.container);
+
+      // pinchAndZoom(els.container, content, pstate, render);
+      resizeHandler(elo.container.clientWidth, elo.container.clientHeight);
+      mouseMoveHandler(elo.cursor, elo.container, pstate, deso.render);
+      deso.render();
     }
-  });
-
-  vscode.postMessage({
-    kind: 'loaded'
-  });
-
-  // console.log('webVcdParser', inst);
-
+  };
 };
+
+module.exports = domContainer;
 
 /* eslint-env browser */
-/* global acquireVsCodeApi */
 
-}).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../package.json":263,"@wavedrom/doppler":14,"style-mod":261,"vcd-stream/lib/get-vcd.js":65,"vcd-stream/lib/vcd-pipe-deso.js":67,"vcd-stream/lib/web-vcd-parser.js":68,"vcd-stream/out/vcd.js":71,"waveql":48}],73:[function(require,module,exports){
+},{"./gen-render-waves-gl.js":14,"./gen-resize-handler.js":15,"./help-panel.js":21,"./mount-tree.js":25,"./render-cursor.js":28}],11:[function(require,module,exports){
+'use strict';
+
+const formatTime = (t, expo) => {
+  const prefixes = ['T', 'G', 'M', 'k', '', 'm', 'µ', 'n', 'p', 'f', 'a', 'z', 'y'];
+  const ts1 = 14 - expo;
+  const prefix = prefixes[(ts1 / 3) |0];
+  const mult = ([100, 10, 1])[ts1 % 3];
+  return (t * mult).toLocaleString() + ' ' + prefix + 's';
+};
+
+module.exports = formatTime;
+
+},{}],12:[function(require,module,exports){
+'use strict';
+
+const {keyName} = require('w3c-keyname');
+
+const executeKeyHandler = (key, keyBindo, pstate, cm) => {
+  return (keyBindo[key] || keyBindo.nop).fn(pstate, cm);
+};
+
+const genKeyHandler = (div, pstate, deso, cm, keyBindo, plugins) => {
+  return event => {
+
+    const modifier = (
+      (event.ctrlKey ? 'Ctrl+' : '') +
+      (event.shiftKey ? 'Shift+' : '') +
+      (event.altKey ? 'Alt+' : '')
+    );
+    // const key = modifier + event.key;
+    const key = modifier + keyName(event);
+
+    if (executeKeyHandler(key, keyBindo, pstate, cm)) {
+      event.stopPropagation();
+      if (plugins != undefined) {
+        plugins.map(fn => fn(key, event));
+      }
+      deso.render();
+    }
+  };
+};
+
+exports.executeKeyHandler = executeKeyHandler;
+exports.genKeyHandler = genKeyHandler;
+
+},{"w3c-keyname":243}],13:[function(require,module,exports){
+'use strict';
+
+const genOnWheel = (element, pstate, deso, cm, keyBindo, plugins) =>
+  event => {
+    const {deltaY} = event;
+    if (event.ctrlKey) {
+      const key = (deltaY < 0)
+        ? 'Ctrl+icon:scrollUp'
+        : ((deltaY > 0) ? 'Ctrl+icon:scrollDown' : 'nop');
+      if (keyBindo[key].fn(pstate)) {
+        if (plugins != undefined) {
+          plugins.map(fn => fn(key, event));
+        }
+        deso.render();
+      }
+      event.preventDefault();
+    } else
+    if (event.shiftKey) {
+      const key = (deltaY < 0) ? 'Shift+icon:scrollUp' : ((deltaY > 0) ? 'Shift+icon:scrollDown' : 'nop');
+      if (keyBindo[key].fn(pstate)) {
+        if (plugins != undefined) {
+          plugins.map(fn => fn(key, event));
+        }
+        deso.render();
+      }
+      event.preventDefault();
+    }
+  };
+
+module.exports = genOnWheel;
+
+},{}],14:[function(require,module,exports){
+'use strict';
+
+const cColors = new Float32Array([
+  0, 0, 0, 0, // 0:
+  0, 0, 1, 1, // 1: (Z) high impedance
+
+  0, 1, 0, 1, // 2: strong 0
+  0, 1, 1, 1, // 3: strong 1
+  1, 0, 0, 1, // 4: (x X) strong unknown
+
+  .5, 1, 1, 1, // 5: vec
+  1, 1, 0, 1, // 6: yellow
+  1, 0, 1, 1, // 7: strange purple
+
+  0, 1, 0, .5, // 8: (l L) weak 0
+  0, 1, 1, .5, // 9: (h H) weak 1
+  1, 0, 0, .5, // 10: (w W) weak unknown
+
+  0, 0, 0, 0, // 11:
+  0, 0, 0, 0, // 12:
+  0, 0, 0, 0, // 13:
+  0, 0, 0, 0, // 14:
+  0, 0, 0, 0  // 15:
+]);
+
+const cTilts = new Float32Array([ // 14
+  0,  0,  // 0
+  1,  -1, // 1
+  1,  0,  // 2
+  1,  1,  // 3
+  -1, -1, // 4
+  -1, 0,  // 5
+  -1, 1   // 6
+]);
+
+const shaderer = (kind, src) => gl => {
+  const vShader = gl.createShader(gl[kind]);
+  gl.shaderSource(vShader, src);
+  gl.compileShader(vShader);
+  return vShader;
+};
+
+const vertexShaderScalar = shaderer('VERTEX_SHADER', `#version 300 es
+in uvec3 pos;
+out vec4 v_color;
+uniform vec2 scale;
+uniform vec2 offset;
+uniform vec4 colors[16];
+uniform vec2 tilts[7];
+uniform float tilt;
+void main() {
+  v_color = colors[pos.z];
+  vec2 node = tilts[pos.y];
+  gl_Position = vec4(
+    float(pos.x) * scale.x + offset.x + node[1] * tilt,
+    float(node[0]) * scale.y + offset.y,
+    1, 1
+  );
+}
+`);
+
+const fragmentShader = shaderer('FRAGMENT_SHADER', `#version 300 es
+precision mediump float;
+in vec4 v_color;
+out vec4 myOutputColor;
+void main() {
+  myOutputColor = v_color;
+}
+`);
+
+const initProgram = gl => {
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShaderScalar(gl));
+  gl.attachShader(program, fragmentShader(gl));
+  gl.linkProgram(program);
+  gl.useProgram(program);
+
+  return 'colors tilts scale offset tilt'
+    .split(/\s+/)
+    .reduce((res, name) => Object.assign(res, {
+      [name]: gl.getUniformLocation(program, name)
+    }), {
+      pos: gl.getAttribLocation(program, 'pos'),
+      gl
+    });
+};
+
+const bar = [
+  (f, t, a, b, c0, c1) => [].concat( // 0
+    (f === 1) ? [a, 2, c1] : [],
+                [a, 5, c0],
+                [b, 5, c0],
+    (t  >  1) ? [b, 0, c0] : []
+  ),
+  (f, t, a, b, c0, c1) => [].concat( // 1
+    (f === 0) ? [a, 5, c0] :
+    (f  >  1) ? [a, 0, c0] : [],
+                [a, 2, c1],
+                [b, 2, c1],
+    (t  >  1) ? [b, 0, c0] : []
+  ),
+  (f, t, a, b, c0, c1) => [a, 0, c0, b, 0, c1] // 2 = Z
+];
+
+const brick = [
+  (f, t, a, b, c0, c1) => [].concat( // 0
+    (f === 0) ? [a, 5, c0] :
+    (f === 1) ? [a, 1, c1] : [],
+                [a, 6, c0],
+    (t === 0) ? [b, 5, c0] :
+                [b, 4, c0],
+    (t === 3) ? [b, 0, c0] : []
+  ),
+  (f, t, a, b, c0, c1) => [].concat( // 1
+    (f === 0) ? [a, 4, c0, a, 3, c1] :
+    (f === 1) ? [a, 2, c1] :
+    (f === 2) ? [a, 3, c1] :
+                [a, 0, c0, a, 3, c1],
+    (t === 1) ? [b, 3, c1] :
+                [b, 1, c1],
+    (t === 3) ? [b, 0, c0] : []
+  ),
+  (f, t, a, b, c0, c1) => [].concat( // 2
+    (f === 0) ? [a, 4, 0] :
+    (f === 1) ? [a, 1, 0] :
+                [a, 0, 0],
+    (t === 0) ? [b, 6, 0, b, 6, c0] :
+    (t === 1) ? [b, 3, 0, b, 3, c1, b, 4, c0] :
+                [b, 0, 0, b, 0, c0, b, 4, c0],
+    (f === 0) ? [a, 4, c0, a, 3, c1] :
+    (f === 1) ? [a, 6, c0, a, 1, c1] :
+                [a, 6, c0, a, 0, c0, a, 3, c1],
+    (t === 0) ? [b, 1, c1, b, 6, c0] :
+    (t === 1) ? [b, 3, c1] :
+                [b, 1, c1, b, 0, c0]
+  )
+];
+
+const wave2vertex = desc => {
+  Object.keys(desc.chango).map(ref => {
+
+    const chang = desc.chango[ref];
+    const { kind, wave } = chang;
+
+    // desc.view.map(lane => {
+    // if (!lane || lane.ref === undefined) { return; }
+    // const chang = desc.chango[lane.ref];
+    // if (chang === undefined) { return; }
+    // const {kind, wave} = chang;
+    // lane.kind = kind;
+    // lane.wave = wave;
+
+    if (kind === 'bit') {
+      const vertices = [];
+      const ilen = wave.length;
+      for (let i = 0; i < ilen; i++) {
+        const f = wave[(i === 0) ? 0 : (i - 1)];
+        const [tim, val] = wave[i];
+        const t = wave[(i === (ilen - 1)) ? i : (i + 1)];
+        const tt = (i === (ilen - 1)) ? desc.time : wave[i + 1][0];
+
+        switch (val) {
+        case 0: case 1: // 0 1
+          vertices.push(...bar[val](f[1], t[1], tim, tt, 2, 3));
+          break;
+        case 2: case 3: // x X
+          vertices.push(...bar[2](f[1], t[1], tim, tt, 4, 4));
+          break;
+        case 4: case 5: // z Z
+          vertices.push(...bar[2](f[1], t[1], tim, tt, 1, 1));
+          break;
+        case 6: case 7: // u U uninitialized
+          vertices.push(...bar[2](f[1], t[1], tim, tt, 6, 6));
+          break;
+        case 8: case 9: // w W weak unknown
+          vertices.push(...bar[2](f[1], t[1], tim, tt, 10, 10));
+          break;
+        case 10: case 11: // l L
+          vertices.push(...bar[0](f[1], t[1], tim, tt, 8, 9));
+          break;
+        case 12: case 13: // h H
+          vertices.push(...bar[1](f[1], t[1], tim, tt, 8, 9));
+          break;
+        default:
+          vertices.push(...bar[2](f[1], t[1], tim, tt, 7, 7));
+            // throw new Error('val is: ' + val);
+        }
+      }
+
+      chang.vertices = new Uint32Array(vertices); // Uint16Array // 16bit
+
+      // lane.vertices = new Uint16Array(vertices);
+
+    }
+    if (kind === 'vec') {
+      const vertices = [];
+      const ilen = wave.length;
+      for (let i = 0; i < ilen; i++) {
+        // const f = wave[(i === 0) ? 0 : (i - 1)];
+        const [tim, val, msk] = wave[i];
+        // const t = wave[(i === (ilen - 1)) ? i : (i + 1)];
+        const tt = (i === (ilen - 1)) ? desc.time : wave[i + 1][0];
+
+        if (val) {
+          if (msk) {
+            vertices.push(...brick[2](2, 2, tim, tt, 4, 4)); // x,z?
+          } else {
+            // vertices.push(...brick[2](2, 2, tim, tt, 5, 5)); // 2
+            vertices.push(
+              tim, 0, 0,
+              tt, 0, 0, tt, 0, 5, tt, 4, 5,
+              tim, 6, 5, tim, 0, 5, tim, 3, 5,
+              tt, 1, 5, tt, 0, 5
+            );
+          }
+        } else {
+          if (msk) {
+            vertices.push(...brick[2](2, 2, tim, tt, 4, 4)); // x
+          } else {
+            // vertices.push(...brick[0](2, 2, tim, tt, 2, 3)); // 0
+            vertices.push(tim, 6, 2, tt, 4, 2);
+          }
+        }
+      }
+
+      chang.vertices = new Uint32Array(vertices); // Uint16Array // 16bit
+
+      // lane.vertices = new Uint16Array(vertices);
+
+    }
+  });
+};
+
+const initData = (loco, desc) => {
+
+  Object.keys(desc.chango).map(ref => {
+
+    const chang = desc.chango[ref];
+    const { vertices } = chang;
+
+    // desc.view.map(lane => {
+    // if (!lane) {
+    //   return;
+    // }
+    // const vertices = desc.chango[lane.ref].vertices;
+    //
+    // if (!vertices) {
+    //   return;
+    // }
+
+    // if (!lane || lane.vertices === undefined) {
+    //   return;
+    // }
+    // const vertices = lane.vertices;
+
+    const gl = loco.gl;
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    chang.vao = gl.createVertexArray();
+    gl.bindVertexArray(chang.vao);
+    gl.vertexAttribIPointer(
+      loco.pos,
+      3, // number of conponents (x, y, z)
+      gl.UNSIGNED_INT, // UNSIGNED_SHORT, // 16bit
+      0 /* stride */, 0 /* offset */
+    );
+    gl.enableVertexAttribArray(loco.pos);
+
+    gl.uniform4fv(loco.colors, cColors);
+    gl.uniform2fv(loco.tilts, cTilts);
+  });
+};
+
+const genRenderWavesGL = (els) => {
+
+  const cnvs = document.createElement('canvas');
+  els.view0.replaceChildren(cnvs);
+  // cnvs.width = 1024;
+  // cnvs.height = 1024;
+  // cnvs.style = 'background-color: #111;';
+  const glProps = {
+    premultipliedAlpha: false,
+    alpha: true,
+    antialias: false,
+    depth: false
+  };
+  const gl = cnvs.getContext('webgl2', glProps);
+  const loco = initProgram(gl);
+
+  return desc => {
+    wave2vertex(desc);
+    initData(loco, desc);
+
+    return (pstate, plugins) => {
+      let aReq;
+      return () => {
+        if (aReq !== undefined) {
+          cancelAnimationFrame(aReq);
+        }
+        aReq = window.requestAnimationFrame(() => {
+          const {width, height, xScale, xOffset, yOffset, yStep, yDuty} = pstate;
+          const cHeight = height - 40;  // FIXME 40
+          cnvs.width = width;
+          cnvs.height = cHeight;
+          // const xs = pstate.scale;
+          // const xo = -1;
+          gl.uniform1f(loco.tilt, 3 / width);
+          gl.uniform2f(loco.scale, 2 * xScale / width, yStep * yDuty / cHeight); // FIXME 40
+          gl.viewport(0, 0, width, cHeight);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          desc.view.map((lane, idx) => {
+            if (!lane) { // || lane.vertices === undefined) {
+              return;
+            }
+            const ref = lane.ref;
+            if (ref === undefined) {
+              return;
+            }
+            const chang = desc.chango[ref];
+            if (chang === undefined) {
+              return;
+            }
+            // console.log(chang);
+            gl.bindVertexArray(chang.vao);
+            gl.uniform2f(loco.offset,
+              (2 * xOffset / width) - 1,
+              (2 * yOffset - 2 * yStep * (idx + .7)) / cHeight + 1
+            );
+            gl.drawArrays(
+              gl.LINE_STRIP, // mode
+              0, // first
+              chang.vertices.length / 3 // count
+            );
+          });
+          plugins.map(fn => fn(desc, pstate, els));
+          aReq = undefined;
+        });
+      };
+    };
+  };
+};
+
+module.exports = genRenderWavesGL;
+
+/* eslint-env browser */
+/* eslint complexity: [1, 30] */
+
+},{}],15:[function(require,module,exports){
+'use strict';
+
+const xOffsetUpdate = require('./x-offset-update.js');
+
+const genResizeHandler = pstate =>
+  (width, height) => {
+    let {xOffset, yOffset, xScale, yStep, time, sidebarWidth, numLanes} = pstate;
+    pstate.width = width;
+    pstate.height = height;
+
+    // Y
+    const yOffsetMax = (numLanes + 2) * 2 * yStep;
+    if (yOffsetMax < 0) {
+      yOffset = 0;
+    } else
+    if (yOffset > yOffsetMax) {
+      yOffset = yOffsetMax;
+    }
+    pstate.yOffset = yOffset;
+
+    // X
+    const xScaleMin = pstate.xScaleMin = (width - sidebarWidth) / time;
+    pstate.xScale = (xScale < xScaleMin) ? xScaleMin : xScale;
+    xOffsetUpdate(pstate, xOffset);
+  };
+
+module.exports = genResizeHandler;
+
+},{"./x-offset-update.js":36}],16:[function(require,module,exports){
+'use strict';
+
+const getElement = divName => {
+  if (typeof divName === 'string') {
+    const c = document.getElementById(divName);
+    if (c === null) {
+      throw new Error('<div> element width Id: "' + divName + '" not found');
+    }
+    return c;
+  }
+  return divName;
+};
+
+module.exports = getElement;
+
+/* eslint-env browser */
+
+},{}],17:[function(require,module,exports){
+'use strict';
+
+const lister = require('./lister.js');
+
+const getListing = async (readers) => {
+  let listing = [];
+  const r = readers.find(reader => reader.ext === 'lst');
+  if (r) {
+    const utf8Decoder = new TextDecoder('utf-8');
+    const list = lister();
+    for (let i = 0; i < 10000; i++) {
+      let { done, value } = await r.reader.read();
+      if (typeof value !== 'string') {
+        value = utf8Decoder.decode(value, {stream: true});
+      }
+      list.onChunk(value);
+      if (done) {
+        listing = list.getTrace();
+        break;
+      }
+    }
+  }
+  return listing;
+};
+
+module.exports = getListing;
+
+},{"./lister.js":24}],18:[function(require,module,exports){
+'use strict';
+
+const getT = (x, pstate) => {
+  const {xOffset, xScale, tgcd } = pstate;
+  return Math.round((x / xScale) - (xOffset / xScale)) * tgcd;
+  // t = ((x / xScale * 2) - (xOffset * width / xScale)) * tgcd;
+  // t = (x / xScale * 2) * tgcd - (xOffset * width / xScale) * tgcd;
+  // t + (xOffset * width / xScale) * tgcd = (x / xScale * 2) * tgcd;
+  // (t / tgcd) + (xOffset * width / xScale) = (x / xScale * 2);
+  // (t / tgcd) * xScale / 2 + (xOffset * width / 2) = x;
+};
+
+module.exports = getT;
+
+},{}],19:[function(require,module,exports){
+'use strict';
+
+const getX = (pstate, time) =>
+  time * pstate.xScale + pstate.xOffset;
+
+module.exports = getX;
+
+},{}],20:[function(require,module,exports){
+'use strict';
+
+// Fletcher Style checksum
+
+const hash = str => {
+  let sum1 = 599;
+  let sum2 = 173;
+  for (let i = 0; i < str.length; i++) {
+    sum1 = (sum1 + str.charCodeAt(i)) & 255;
+    sum2 = (sum2 + sum1) & 255;
+  }
+  return (sum2 ^ sum1 ^ (sum2 >> 5) ^ (sum1 >> 5)) % 36;
+};
+
+module.exports = hash;
+
+},{}],21:[function(require,module,exports){
+'use strict';
+
+const genSVG = require('onml/gen-svg.js');
+
+const width = exports.width = 320;
+
+exports.toggle = (pstate) => {
+  console.log('toggle');
+  const visible = pstate.rightPanelVisible = !pstate.rightPanelVisible;
+  pstate.container.style.setProperty(
+    '--right-panel-width',
+    (visible ? width : 0) + 'px'
+  );
+};
+
+exports.mlIcon = () => {
+  const qMark = ['g', {w: 24, h: 24},
+    ['circle', {style: 'fill: #facd6a26', r: 12, cx: 12, cy: 12}],
+    ['path', {style: 'fill: #6e6f19', d: 'M 12 4 a 7 7 0 1 1 0 16 a 7 7 0 1 1 0 -16 z v -1 a 8 8 0 1 0 0 18 a 8 8 0 1 0 0 -18 z'}],
+    ['path', {style: 'fill: #c8a100', d: 'M 9.255 9.786 a .237 .237 0 0 0 .241 .247 h .825 c .138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0 -.552 -.42 -.94 -1.029 -.94 -.584 0 -1.009 .388 -1.009 .94 z'}]
+  ];
+
+  const svg = genSVG(24, 24);
+  svg[1].width = 48;
+  svg[1].height = 48;
+  svg.push(qMark);
+  // return ['a', {href, target: '_blank'}, svg];
+  return svg;
+};
+
+const mouseOutline = ['path', {
+  style: 'stroke:#fff;fill:none',
+  d: 'm 14,8 c 1,0 2,1 2,2 v 5 c 0,1 -1,2 -2,2 -1,0 -2,-1 -2,-2 v -5 c 0,-1 1,-2 2,-2 m 0,0 V 6 m 0,13 V 17 M 3,22 V 13 C 3,8 10,6 13,6 h 2 c 3,0 10,2 10,7 v 9'
+}];
+
+const mouseWheel = ['path', {
+  style: 'stroke:none;fill:#aa0',
+  d: 'm 14,8.5 c 1,0 2,1 2,2 v 5 c 0,1 -1,2 -2,2 -1,0 -2,-1 -2,-2 v -5 c 0,-1 1,-2 2,-2'
+}];
+
+const icons = {
+  scrollUp: genSVG(28, 24).concat([
+    mouseWheel,
+    mouseOutline,
+    ['path', {style: 'stroke:#fff;fill:none', d: 'm 10,4 4,-3 4,3'}]
+  ]),
+  scrollDown: genSVG(28, 24).concat([
+    mouseWheel,
+    mouseOutline,
+    ['path', {style: 'stroke:#fff;fill:none', d: 'm 10,20 4,3 4,-3'}]
+  ])
+};
+
+exports.mlPanel = (keyBindo) => {
+  const ml = ['div',
+    ['div', {class: 'wd-help-panel-row'},
+      ['h3', 'Keyboard / Mouse shortcuts']
+    ]
+  ];
+  const descMap = Object.keys(keyBindo).reduce((res, key) => {
+    const val = keyBindo[key];
+    const desc = val.desc;
+    if (desc) {
+      res[desc] = (res[desc] || []).concat(key);
+    }
+    return res;
+  }, {});
+
+  Object.keys(descMap).map((desc, i) => {
+    ml.push(['div',
+      {class: 'wd-help-panel-row' + ((i & 1) ? '' : ' wd-even')},
+      ['span', {class: 'wd-key-help-desc'}, desc],
+      ['span', {class: 'wd-key-help-comb'},
+        ...descMap[desc].map((d) => ['span',
+          {class: 'wd-key-group'},
+          ...d.split('+').flatMap((item, i) => {
+            const res = (i === 0) ? [] : ['+'];
+            const kind = item.split(':');
+            if (kind[0] === 'icon') {
+              res.push(icons[kind[1]]);
+            } else {
+              res.push(['span', {class: 'wd-key-item'}, item]);
+            }
+            return res;
+          })
+        ])
+      ]
+    ]);
+  });
+  return ml;
+};
+
+exports.css = {
+  '.wd-help-icon': {
+    cursor: 'help',
+    position: 'absolute',
+    right: 'calc(var(--right-panel-width) * ' + (-80 / width) + ' + 20px)',
+    transition: 'right .3s',
+    bottom: '32px'
+  },
+  '.wd-help-panel': {
+    width,
+    'font-size': 16,
+    position: 'absolute',
+    right: '-' + width + 'px',
+    transition: 'right .3s',
+    top: '0px',
+    height: '100%',
+    'overflow-y': 'auto'
+  },
+  '.wd-even': {
+    background: '#ffffff11'
+  },
+  '.wd-help-panel-row': {
+    display: 'flex',
+    padding: '10px 10px 10px 10px'
+  },
+  '.wd-key-help-desc': {
+    display: 'flex',
+    'align-items': 'center',
+    'flex-grow': 1
+  },
+  '.wd-key-help-comb': {
+    display: 'flex',
+    'flex-direction': 'column'
+  },
+  '.wd-key-item': {
+    'border-style': 'outset',
+    'border-radius': '6px',
+    'border-color': '#655 #27a #27a #655',
+    padding: '0 4',
+    margin: '0 2'
+  },
+  '.wd-key-group': {
+    display: 'flex',
+    padding: '0 0 4 0'
+  }
+};
+
+},{"onml/gen-svg.js":178}],22:[function(require,module,exports){
+'use strict';
+
+const getElement = require('./get-element.js');
+const getListing = require('./get-listing.js');
+const domContainer = require('./dom-container.js');
+const pluginRenderValues = require('./plugin-render-values.js');
+const pluginRenderTimeGrid = require('./plugin-render-time-grid.js');
+const keyBindo = require('./key-bindo.js');
+const mountTree = require('./mount-tree.js');
+const genKeyHandler = require('./gen-key-handler.js');
+const genOnWheel = require('./gen-on-wheel.js');
+const xOffsetUpdate = require('./x-offset-update.js');
+const getX = require('./get-x.js');
+const getT = require('./get-t.js');
+const themeAll = require('./theme-all.js');
+const helpPanel = require('./help-panel.js');
+
+exports.getListing = getListing;
+exports.getElement = getElement;
+exports.domContainer = domContainer;
+exports.pluginRenderValues = pluginRenderValues;
+exports.pluginRenderTimeGrid = pluginRenderTimeGrid;
+exports.keyBindo = keyBindo;
+exports.mountTree = mountTree;
+exports.genKeyHandler = genKeyHandler;
+exports.genOnWheel = genOnWheel;
+exports.xOffsetUpdate = xOffsetUpdate;
+exports.getX = getX;
+exports.getT = getT;
+exports.themeAll = themeAll;
+exports.helpPanel = helpPanel;
+
+},{"./dom-container.js":10,"./gen-key-handler.js":12,"./gen-on-wheel.js":13,"./get-element.js":16,"./get-listing.js":17,"./get-t.js":18,"./get-x.js":19,"./help-panel.js":21,"./key-bindo.js":23,"./mount-tree.js":25,"./plugin-render-time-grid.js":26,"./plugin-render-values.js":27,"./theme-all.js":32,"./x-offset-update.js":36}],23:[function(require,module,exports){
+'use strict';
+
+const xOffsetUpdate = require('./x-offset-update.js');
+const xScaleUpdate = require('./x-scale-update.js');
+const helpPanel = require('./help-panel.js');
+
+const yScroll = delta => (pstate, cm) => {
+  const info = cm.getScrollInfo();
+  cm.scrollTo(null, info.top + info.clientHeight * delta);
+  return false;
+};
+
+const pluso = {
+  desc: 'Zoom in time',
+  fn: pstate => xScaleUpdate(pstate, 3 / 2 * pstate.xScale)
+};
+
+const minuso = {
+  desc: 'Zoom out time',
+  fn: pstate => xScaleUpdate(pstate, 2 / 3 * pstate.xScale)
+};
+
+const fullo = {
+  desc: 'All of time',
+  fn: pstate => xScaleUpdate(pstate, pstate.xScaleMin)
+};
+
+const scroll = {
+  left: {
+    desc: 'Scroll into the past',
+    fn: pstate => xOffsetUpdate(pstate, pstate.xOffset + .2 * pstate.width)
+  },
+  right: {
+    desc: 'Scroll into the future',
+    fn: pstate => xOffsetUpdate(pstate, pstate.xOffset - .2 * pstate.width)
+  },
+  up:   {
+    desc: 'scroll up',
+    fn: yScroll(-.1)
+  },
+  down: {
+    desc: 'scroll down',
+    fn: yScroll(.1)
+  }
+};
+
+const editable = {
+  desc: 'Toggle edit mode',
+  fn: (pstate, cm) => {
+    console.log('editable', pstate, cm);
+  }
+};
+
+module.exports = {
+  // Alt +  <,  >.    left / right
+  'Alt+,': scroll.left,  'Shift+icon:scrollUp':  scroll.left,
+
+  'Alt+.': scroll.right, 'Shift+icon:scrollDown': scroll.right,
+
+  // Alt +  [  ]      home / end
+  'Alt+[': {desc: 'Jump to beginning of time', fn: pstate => xOffsetUpdate(pstate, pstate.sidebarWidth)}, // Home
+
+  'Alt+]': {desc: 'Jump to end time',       fn: pstate => xOffsetUpdate(pstate, pstate.width - pstate.xScale * pstate.time)}, // End
+
+  // ALT +  -  +
+  'Alt+=': pluso,  // '+': pluso,  '=': pluso,
+  'Ctrl+icon:scrollUp':  pluso,
+
+  'Alt+-': minuso, // '-': minuso, '_': minuso,
+  'Ctrl+icon:scrollDown': minuso,
+
+  'Alt+0': fullo, // 'Shift+f': fullo, F: fullo, 'Shift+F': fullo,
+
+  'Alt+/': editable,
+
+  'Shift+?': {
+    desc: 'Toggle help panel',
+    fn: helpPanel.toggle},
+  // CAN'T DO: Alt + e, d, f, l
+
+  // ArrowUp:    scroll.up,    'Shift+ArrowUp':    scroll.up,
+  // ArrowDown:  scroll.down,  'Shift+ArrowDown':  scroll.down,
+
+  // PageUp:     {desc: 'scroll page up',    fn: yScroll(-1)},
+  // PageDown:   {desc: 'scroll page down',  fn: yScroll(1)},
+
+  nop:        {fn: () => false}
+};
+
+},{"./help-panel.js":21,"./x-offset-update.js":36,"./x-scale-update.js":37}],24:[function(require,module,exports){
+'use strict';
+
+module.exports = () => {
+  const trace = {};
+  let tail = '';
+  return {
+    onChunk: (chunk) => {
+      const rows = (tail + chunk).split('\n');
+      // console.log('chunk:', chunk.length, 'tail:', tail.length, 'rows:', rows.length);
+      tail = rows.pop();
+      rows.map(row => {
+        const m = row.match(/\s*([0-9a-f]+):\s*([0-9a-f]+)\s+(.+)/);
+        if (m) {
+          const pc = parseInt(m[1], 16);
+          const op = m[2];
+          const asm = m[3].replace(/\t/, ' ');
+          trace[pc] = {op, asm};
+        }
+      });
+    },
+    getTrace: () => trace
+  };
+};
+
+},{}],25:[function(require,module,exports){
+'use strict';
+
+const defaultElemento = {
+  container:  ['div', {class: 'wd-container', id: 'wd-container'}],
+  grid:       ['div', {class: 'wd-grid'}],    // style: 'position: absolute; left: 0px;' // z-index: -10'
+  view0:      ['div', {class: 'wd-view'}],    // style: 'position: absolute; left: 0px;' // z-index: -10'
+  values:     ['div', {class: 'wd-values'}], // style: 'position: absolute; left: 0px;' // z-index: -9'
+  cursor:     ['div', {class: 'wd-cursor'}], // style: 'position: absolute; top: 0px; left: 0px;'
+  // style: 'overflow: hidden; position: absolute; top: 0px; left: 0px;'
+  waveqlPanel: ['div', {class: 'wd-waveql'}],
+  rightPanel: ['div', {class: 'wd-help-panel'}],
+  menu:       ['div', {class: 'wd-help-icon'}] // style: 'position: absolute; right: 32px; bottom: 32px;'
+};
+
+const defaultLayers = [
+  'grid',
+  'view0',
+  'values',
+  'waveqlPanel',
+  'cursor',
+  'rightPanel',
+  'menu'
+];
+
+const createElemento = elemento => {
+  const names = Object.keys(elemento);
+  return names.reduce((res, name) => {
+    const ml = elemento[name];
+    const el = document.createElement(ml[0]);
+    const attr = (typeof ml[1] === 'object') ? ml[1] : {};
+    Object.keys(attr).map(key => {
+      if (key === 'class') {
+        el.classList.add(attr.class);
+      } else {
+        el.setAttribute(key, attr[key]);
+      }
+    });
+    res[name] = el;
+    return res;
+  }, {});
+};
+
+const createContainer = (els, layers) => {
+  layers.map(layer => els.container.appendChild(els[layer]));
+  return els.container;
+};
+
+exports.defaultElemento = defaultElemento;
+exports.defaultLayers = defaultLayers;
+exports.createElemento = createElemento;
+exports.createContainer = createContainer;
+
+/* eslint-env browser */
+},{}],26:[function(require,module,exports){
+'use strict';
+
+const genSVG = require('onml/gen-svg.js');
+const stringify = require('onml/stringify.js');
+
+const formatTime = require('./format-time.js');
+const getT = require('./get-t.js');
+
+const round10 = n =>
+  ([
+  /*0  1  2  3  4  5  6  7  8   9 */
+    0, 1, 2, 4, 4, 5, 5, 5, 10, 10,
+    /*10  11  12  13  14  15  16  17  18  19 */
+    10, 10, 10, 15, 15, 15, 15, 20, 20, 20
+  ])[Math.round(n)]
+  || Math.round(n);
+
+const getTimeGrid = pstate => {
+  const { sidebarWidth, width, height, timescale, xScale, tgcd, xOffset, topBarHeight, botBarHeight } = pstate;
+  const fontHeight = 16;
+  // const timeLineStart = (xOffset * width / 2) |0;
+
+  const timeGrid = ['g', {}];
+
+  const xStartExact = getT(sidebarWidth, pstate);
+  const xFinishExact = getT(width, pstate);
+  const density = 1;
+  const xLines = Math.round(density * width / sidebarWidth);
+
+  const xStep = ((xFinishExact - xStartExact) / xLines);
+  const xExp = Math.pow(10, Math.log10(xStep) |0);
+  const xDelta = round10(xStep / xExp) * xExp;
+
+  const xStart = Math.ceil(xStartExact / xDelta) * xDelta;
+  const xFinish = Math.floor(xFinishExact / xDelta) * xDelta;
+
+  for (let t = xStart; t <= xFinish; t += xDelta) {
+    const x = Math.round(t / tgcd * xScale + xOffset);
+    timeGrid.push(['g', {},
+      ['line', {
+        class: 'wd-grid-time',
+        x1: x,
+        x2: x,
+        y2: height
+      }],
+      ['text', {
+        class: 'wd-grid-time',
+        x: x,
+        y: (topBarHeight + fontHeight) / 2
+      }, formatTime(t, timescale)],
+      ['text', {
+        class: 'wd-grid-time',
+        x: x,
+        y: height - (botBarHeight - fontHeight) / 2
+      }, formatTime(t, timescale)]
+    ]);
+  }
+
+  return timeGrid;
+};
+
+const pluginRenderTimeGrid = (desc, pstate, els) => {
+  const {width, height} = pstate;
+  const ml = genSVG(width, height);
+  ml.push(getTimeGrid(pstate));
+  els.grid.innerHTML = stringify(ml);
+};
+
+module.exports = pluginRenderTimeGrid;
+
+},{"./format-time.js":11,"./get-t.js":18,"onml/gen-svg.js":178,"onml/stringify.js":182}],27:[function(require,module,exports){
+'use strict';
+
+const renderValues = require('./render-values.js');
+
+const pluginRenderValues = (desc, pstate, els) => {
+  const gen = renderValues(desc, pstate);
+  for (let i = 0; i < 1e6; i++) {
+    const iter = gen.next();
+    if (iter.done) {
+      els.values.innerHTML = iter.value;
+      break;
+    }
+  }
+};
+
+module.exports = pluginRenderValues;
+
+},{"./render-values.js":29}],28:[function(require,module,exports){
+'use strict';
+
+const genSVG = require('onml/gen-svg.js');
+const stringify = require('onml/stringify.js');
+const formatTime = require('./format-time.js');
+
+const renderCursor = (cfg, pstate) => {
+  const {xmargin, fontWidth, fontHeight} = cfg;
+  const {height, xScale, xOffset, tgcd, timescale, xCursor} = pstate;
+
+  const xx = Math.round((xCursor - xOffset) / xScale) * tgcd;
+  const label = formatTime(xx, timescale);
+  const lWidth = (label.length + 1) * fontWidth;
+
+  const body = [
+    // vertical line
+    ['line', {
+      class: 'wd-cursor-line',
+      x1: xmargin + 0.5,
+      x2: xmargin + 0.5,
+      y1: 0,
+      y2: height
+    }],
+    // top time label
+    ['rect', {
+      class: 'wd-cursor-time',
+      x: xmargin - lWidth / 2,
+      y: 0,
+      width: lWidth,
+      height: fontHeight * 1.25
+    }],
+    ['text', {
+      class: 'wd-cursor-time',
+      x: xmargin,
+      y: fontHeight
+    }, label],
+    // bottom time label
+    ['rect', {
+      class: 'wd-cursor-time',
+      x: xmargin - lWidth / 2,
+      y: height - fontHeight * 1.25,
+      width: lWidth,
+      height: fontHeight * 1.25
+    }],
+    ['text', {
+      class: 'wd-cursor-time',
+      x: xmargin,
+      y: height - fontHeight * .25
+    }, label]
+  ];
+  return stringify(genSVG(2 * xmargin, height).concat(body));
+};
+
+module.exports = renderCursor;
+
+},{"./format-time.js":11,"onml/gen-svg.js":178,"onml/stringify.js":182}],29:[function(require,module,exports){
+'use strict';
+
+const tt = require('onml/tt.js');
+const genSVG = require('onml/gen-svg.js');
+const stringify = require('onml/stringify.js');
+// const getPco = require('./get-pco.js');
+const water = require('./water.js');
+const bracer = require('./bracer.js');
+const vline = require('./vline.js');
+const getX = require('./get-x.js');
+const vlineStylo = require('./vline-stylo.js');
+
+const defs = ['defs',
+  ['linearGradient', {id: 'valid'},
+    ['stop', {offset: '30%', 'stop-color': 'hsla(100, 100%, 100%,  0)'}],
+    ['stop', {offset: '90%', 'stop-color': 'hsla(100, 100%, 100%, .3)'}]
+  ],
+  ['linearGradient', {id: 'valid&ready'},
+    ['stop', {offset: '30%', 'stop-color': 'hsla(100, 100%, 50%,  0)'}],
+    ['stop', {offset: '90%', 'stop-color': 'hsla(100, 100%, 50%, .5)'}]
+  ],
+  ['linearGradient', {id: 'valid&~ready'},
+    ['stop', {offset: '30%', 'stop-color': 'hsla(50, 100%, 50%,  0)'}],
+    ['stop', {offset: '90%', 'stop-color': 'hsla(50, 100%, 50%, .5)'}]
+  ],
+  ...Object.keys(vlineStylo).map(key => {
+    const e = vlineStylo[key];
+    return ['filter', {id: 'neonGlow-' + key, width: 7, x: -3},
+      ['feGaussianBlur', {stdDeviation: 3, in: 'SourceAlpha', result: 'ablur'}],
+      ['feFlood', {'flood-color': `hsl(${e.h},100%,${e.l}%)`, result: 'xf'}],
+      ['feComposite', {in: 'xf', in2: 'ablur', operator: 'in'}]
+    ];
+  })
+];
+
+const getLabel = (vPre, mPre, x, w, fmt) => {
+  const radix = (fmt || {}).radix;
+  const base = ({
+    b: 2, o: 8, d: 10, h: 16, H: 16
+  })[radix] || 16;
+
+  if (mPre) {
+    if (vPre) {
+      return ['text', {x, class: 'zxviolet'}, '?'];
+    } else {
+      return ['text', {x, class: 'xred'}, 'x'];
+    }
+  } else {
+    const numPos = (w / 8) |0;
+    let txtOrig = vPre.toString(base);
+    if (radix === 'H') {
+      txtOrig = txtOrig.toUpperCase();
+    }
+
+    // ? txtOrig.slice(0, numPos - 1) + '\u22ef' // MSB
+    const txtShort = (txtOrig.length > numPos)
+      ? ((numPos === 1)
+        ? '\u22EE'
+        : '\u22EF' + txtOrig.slice(1 - numPos)) // LSB
+      : txtOrig;
+    return ['text', {x}, ['title', txtOrig], txtShort]; // idx.toString(36)]);
+  }
+};
+
+const renderValues = function* (desc, pstate) {
+  const { width, height, sidebarWidth, yOffset, yStep, topBarHeight, botBarHeight } = pstate;
+  const { view } = desc;
+
+  const ilen = height / yStep;
+  const iskip = yOffset / yStep;
+
+  // console.log(iskip, ilen, view.length);
+
+  const ml = genSVG(width, height - topBarHeight - botBarHeight);
+
+  let ifirst = 0;
+  for (let i = 0; i < ilen; i += 1) {
+    const lane = view[i];
+    if (lane && (lane.name || lane.kind)) {
+      if (i > iskip) {
+        break;
+      }
+      ifirst = i;
+    }
+  }
+  ml.push(defs);
+  yield;
+
+  const markers = ['g'];
+  ml.push(markers);
+
+  for (let i = 0; i < (iskip + ilen); i++) {
+    const lane = view[i + (ifirst |0)];
+
+    if (lane && lane.kind === 'DIZ') {
+      markers.push(['g', tt(0, Math.round((i - (iskip - ifirst) + 1.18) * yStep))].concat(water(lane, desc, pstate)));
+    } else
+
+    if (lane && lane.kind === 'brace') {
+      markers.push(['g', tt(0, Math.round((i - (iskip - ifirst) + 1.18) * yStep))].concat(bracer(lane, desc, pstate)));
+    } else
+
+    if (lane && lane.ref) {
+      const chango = desc.chango[lane.ref];
+      if (chango && chango.kind === 'vec') {
+        const mLane = ['g', tt(0, Math.round((i - (iskip - ifirst) + .9) * yStep))];
+        const { wave } = chango;
+        const jlen = wave.length;
+
+        perLane: {
+          let [tPre, vPre, mPre] = wave[0];
+          let xPre = getX(pstate, tPre);
+          for (let j = 1; j <= jlen; j++) {
+            const mark = wave[j];
+            const [tCur, vCur, mCur] = (mark || [desc.time, 0, 0]);
+            const xCur = getX(pstate, tCur);
+            if (vPre || mPre) {
+              if (xPre > width && xCur > width) { // both time stamps to the right
+                break perLane;
+              }
+              if (!((xPre < sidebarWidth)  && (xCur < sidebarWidth))) { // both time stamps to the left
+                const xPreNorm = ((xPre > sidebarWidth) ? xPre : sidebarWidth) |0;
+                const xCurNorm = ((xCur < width) ? xCur : width) |0;
+                const w = xCurNorm - xPreNorm;
+                if (w > 8) {
+                  const x = Math.round((xPreNorm + xCurNorm) / 2);
+                  mLane.push(getLabel(vPre, mPre, x, w, lane.format));
+                }
+              }
+            }
+            xPre = xCur;
+            vPre = vCur;
+            mPre = mCur;
+          }
+        }
+        ml.push(mLane);
+      }
+      yield;
+    }
+  }
+
+  // console.log(view);
+  for (let i = 0; i < view.length; i++) {
+    const lane = view[i];
+    if (lane && lane.vlines) {
+      markers.push(...vline(lane, pstate, i));
+    }
+  }
+  yield;
+  return stringify(ml);
+};
+
+module.exports = renderValues;
+/* eslint complexity: [1, 55] */
+
+},{"./bracer.js":9,"./get-x.js":19,"./vline-stylo.js":33,"./vline.js":34,"./water.js":35,"onml/gen-svg.js":178,"onml/stringify.js":182,"onml/tt.js":184}],30:[function(require,module,exports){
+'use strict';
+
+function* sampler (wave) {
+  let t1, v0, v1;
+  [t1, v1] = wave[0]; // initial state
+  let t = 0;
+  for (let i = 1; i < wave.length; i++) {
+    v0 = v1;
+    [t1, v1] = wave[i]; // next change
+    while (true) {
+      if (t >= t1) {
+        break;
+      }
+      t = yield v0;
+    }
+  }
+  while(true) { // to the end of time
+    yield v1;
+  }
+}
+
+module.exports = sampler;
+
+},{}],31:[function(require,module,exports){
+'use strict';
+
+const getT = require('./get-t.js');
+
+function* surferer (wave, pstate) {
+  const { sidebarWidth, width } = pstate;
+  const xStartExact = getT(sidebarWidth, pstate);
+  const xFinishExact = getT(width, pstate);
+
+  let i = 0;
+  for (i = 0; i < wave.length; i++) { // seek to the start of viewport
+    if ((wave[i] === undefined) || (wave[i][0] >= xStartExact)) {
+      break;
+    }
+  }
+  for (; i < wave.length; i++) { // render viewport
+    if ((wave[i] === undefined) || (wave[i][0] > xFinishExact)) {
+      break;
+    }
+    yield i;
+  }
+}
+
+module.exports = surferer;
+
+},{"./get-t.js":18}],32:[function(require,module,exports){
+'use strict';
+
+const helpPanel = require('./help-panel.js');
+
+const body = {
+  '*': {
+    // width: '90%',
+    'scrollbar-width': 'auto',
+    'scrollbar-color': '#aaa #555'
+  },
+  '*::-webkit-scrollbar': {
+    width: '8px'
+  },
+  '*::-webkit-scrollbar-track': {
+    background: '#555'
+  },
+  '*::-webkit-scrollbar-thumb': {
+    'background-color': '#777',
+    'border-radius': '4px',
+    border: '1px solid #aaa'
+  },
+  body: {
+    /* overflow-x: hidden; */
+    /* overflow-y: auto; */
+    overflow: 'hidden',
+    /* overflow: auto; */
+    padding: '0px',
+    margin: '0px',
+    border: '0px',
+    background: '#111',
+    color: '#fff',
+    'font-family': 'Iosevka Drom Web',
+    /* font-size: 16px; */
+    height: '100%'
+  }
+};
+
+const wd = {
+  '.wd-container': {
+    /* background-color: #1c1c1c; */
+    /* overflow-x: hidden; */
+    /* overflow-y: auto; */
+    /* overflow: hidden; */
+    /* overflow: auto; */
+    '--right-panel-width': '0px',
+    width: 'calc(100% - var(--right-panel-width))',
+    // height: '100%',
+    cursor: 'col-resize',
+    transition: 'width .3s',
+    position: 'absolute',
+    top: '0px',
+    bottom: '0px',
+    left: '0px',
+    right: '0px'
+  },
+  '.wd-grid': {
+    position: 'absolute'
+  },
+  '.wd-view': {
+    position: 'absolute',
+    top: '24px',
+    bottom: '24px'
+  },
+  '.wd-values': {
+    position: 'absolute',
+    top: '24px',
+    bottom: '24px'
+  },
+  '.wd-waveql': {
+    position: 'absolute',
+    top: '24px',
+    bottom: '24px',
+    width: '100%',
+    transition: 'width .3s'
+    // width: '100%'
+  },
+  '.wd-cursor': {
+    position: 'absolute',
+    /* z-index: 1; */
+    'pointer-events': 'none'
+  },
+  'line.wd-cursor-line': {
+    'stroke-dasharray': '4 3',
+    stroke: '#fff7',
+    'stroke-width': '1px'
+  },
+  'text.wd-cursor-time': {
+    'font-size': '20px',
+    fill: 'hsl(70, 100%, 50%)',
+    'text-anchor': 'middle',
+    'z-index': 1
+  },
+  'rect.wd-cursor-time': {
+    fill: '#222'
+  },
+  '.wd-values text': {
+    'font-size': '14px',
+    'text-anchor': 'middle',
+    fill: '#fff'
+  },
+  'line.wd-grid-time': {
+    stroke: '#333',
+    'stroke-width': '1px'
+  },
+  'text.wd-grid-time': {
+    'text-anchor': 'middle',
+    fill: 'hsla(49, 100%, 50%, 0.7)'
+  },
+
+  '.wd-progress': {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)'
+  },
+
+  'text.xred': {
+    fill: 'hsl(0, 100%, 50%)'
+  },
+  'text.zxviolet': {
+    fill: 'hsl(287, 100%, 67%)'
+  },
+
+  'text.pc':          { 'text-anchor': 'start' },
+  'tspan.pc-addr':    { fill: 'hsl(202 100% 71%)' },
+  'tspan.pc-opcode':  { fill: 'hsl(37 100% 50%)' },
+  'tspan.pc-asm':     { fill: 'hsl(0 0% 100%)' },
+  'rect.pc-odd':      { fill: '#222' },
+  'rect.pc-even':     { fill: '#444' },
+
+  '.event0': { fill: 'hsla(0, 0%, 100%, 0.3)' },
+  '.event1': { fill: 'hsl(101, 100%, 50%)' },
+  '.event2': { fill: 'hsl(57, 100%, 50%)' },
+  '.event3': { fill: 'hsl(32, 100%, 50%)' },
+
+  'line.gap': { stroke: '#fff', 'stroke-dasharray': '4 3' }
+};
+
+const cto = {};
+for (let i = 0; i < 36; i++) {
+  cto['rect.ct' + i.toString(36)] = {
+    fill: 'hsla(' + (i * 10) + ', 100%, 50%, 0.5)'
+  };
+}
+
+const pco = {};
+for (let i = 0; i < 8; i++) {
+  cto['rect.pc' + i] = {
+    fill: 'none',
+    'stroke-width': '4px',
+    stroke: 'hsl(' + ((30 + i * 135) % 360) + ', 100%, 75%)'
+  };
+}
+
+module.exports = Object.assign(body, wd, helpPanel.css, cto, pco);
+
+/* eslint-env browser */
+
+},{"./help-panel.js":21}],33:[function(require,module,exports){
+'use strict';
+
+const vlineStylo = {
+  w: {h:0,   l:100}, // w
+  r: {h:10,  l:45}, // r
+  o: {h:33,  l:65}, // o
+  y: {h:55,  l:50}, // y
+  g: {h:120, l:75}, // g
+  c: {h:190, l:50}, // c
+  b: {h:215, l:70}, // b
+  v: {h:280, l:55} // v
+};
+
+module.exports = vlineStylo;
+
+},{}],34:[function(require,module,exports){
+'use strict';
+
+const getX = require('./get-x.js');
+const onml = require('onml');
+const vlineStylo = require('./vline-stylo.js');
+
+/* Zones
+1  2  3
+4  5  6
+7  8  9
+*/
+
+const vline = (lane, pstate, i) => {
+  const {width, height, timescale, yStep, yOffset, topBarHeight, botBarHeight} = pstate;
+  const y = (i + .7) * yStep - yOffset;
+  const yMax = height - topBarHeight - botBarHeight;
+
+  return lane.vlines.map(vline => {
+    const t = vline.value * Math.pow(10, vline.mult - timescale);
+    const x = Math.round(getX(pstate, t));
+    const style = (vlineStylo[vline.style] || vlineStylo.w);
+    const color = `hsl(${style.h},100%,${style.l}%)`;
+    const symbol = ['path', {style: 'stroke-width: 1px; stroke: ' + color}];
+
+    if ((x < 0) || (x > width)) {
+      if ((y < 0) || (y > yMax)) { // Zones: 1, 7, 3, 9
+        return ['g'];
+      }
+      if (x < 0) { // Zone: 4
+        symbol[1].d = `M ${0} ${y} l 8 -4 v 8 z`;
+        return symbol;
+      }
+      // Zone: 6
+      symbol[1].d = `M ${width - 16} ${y} l -8 -4 v 8 z`;
+      return symbol;
+    }
+
+    const line = ['g', onml.tt(x, 0),
+      ['rect', {x: -1, width: 3, height, fill: '#fff', filter: 'url(#neonGlow-' + vline.style + ')'}],
+      ['rect', {width: 1, height, fill: color}]
+    ];
+
+    if (y < 0) { // Zone: 2
+      symbol[1].d = `M ${x} ${topBarHeight} l 4 8 h -8 z`;
+      return ['g', line, symbol];
+    }
+    if (y > yMax) { // Zone: 8
+      symbol[1].d = `M ${x} ${yMax} l -4 -8 h 8 z`;
+      return ['g', line, symbol];
+    }
+    // Zone: 5
+    symbol[1].d = `M ${x} ${y} m-4 0 l 4 -4 l 4 4 l -4 4 z`;
+    return ['g', line, symbol];
+  });
+};
+
+module.exports = vline;
+
+},{"./get-x.js":19,"./vline-stylo.js":33,"onml":179}],35:[function(require,module,exports){
+'use strict';
+
+// PC based pipeline view
+
+const tt = require('onml/tt.js');
+const getX = require('./get-x.js');
+const surferer = require('./surferer.js');
+const sampler = require('./sampler.js');
+const hash = require('./hash.js');
+
+const pushBrick = (listing, pco, v, name, label, t) => {
+  let pc = v;
+  let tail = false;
+  let le = listing[pc];
+  if (le === undefined) {
+    pc = v - 2;
+    le = listing[pc];
+    tail = true;
+  }
+  if (le) {
+    if (pco[pc] === undefined) {
+      pco[pc] = {op: le.op, asm: le.asm, bricks: []};
+    }
+    pco[pc].bricks.push({name, label, t, tail});
+  }
+};
+
+const progress = (lane, desc, pstate) => {
+  const pco = {};
+
+  const { listing } = desc;
+  const { clock, othero } = lane;
+
+
+  if (desc.chango[clock.ref] === undefined) {
+    console.log(desc.chango, clock, clock.ref);
+    return pco;
+  }
+  const clockWave = desc.chango[clock.ref].wave;
+  const clockEr = surferer(clockWave, pstate);
+
+  // create samplers
+  for (const id of Object.keys(othero)) {
+    ['pc', 'go'].map(role => {
+      const obj = othero[id][role];
+      obj.sampler = sampler(desc.chango[obj.ref].wave);
+      obj.sampler.next(0); // dry run
+    });
+  }
+
+  let count = 8000; // max number of pipeline bricks
+
+  outerLoop: for (const iClock of clockEr) {
+    const [tClock, vClock] = clockWave[iClock];
+    if (vClock) {
+      for (const key of Object.keys(othero)) {
+        const id = othero[key];
+        const go = id.go.sampler.next(tClock).value;
+        const pc = id.pc.sampler.next(tClock).value;
+        const KEY = key.toUpperCase();
+        if (go) {
+          pushBrick(listing, pco, pc, KEY, KEY, tClock);
+          if (count-- === 0) {
+            break outerLoop;
+          }
+        }
+      }
+    }
+  }
+
+  for (const [idx, key] of Object.keys(pco).entries()) {
+    if (pco[key] !== undefined) {
+      pco[key].idx = idx;
+    }
+  }
+
+  return pco;
+};
+
+const water = (lane, desc, pstate) => {
+  const { width, yStep } = pstate;
+  const brickWidth = getX(pstate, 2) - getX(pstate, 0);
+
+  const pco = progress(lane, desc, pstate);
+
+  const pcs = Object.keys(pco).map(e => Number(e)).sort();
+
+  const mLanes = [];
+
+  // const pco = getPco(desc, pstate, lane); // signals, dats, cycles, listing, state.cursor);
+  for (let j = 0; j < lane.len - 2; j++) {
+    const pc = pcs[j];
+    const pcd = pco[pc];
+    if (pc === undefined || pcd === undefined) {
+      break;
+    }
+
+    const asm = pcd.asm.replace(/<.+>/, '\u25C6');
+    const mLane = ['g', tt(0, Math.round(j * yStep))];
+
+    // striped background
+    if (j & 1) {
+      mLane.push(['rect', {width: width, height: yStep - 1, class: 'pc-odd'}]);
+      // ['rect', {width: width, height: yStep - 2, class: (j & 1) ? 'pc-odd' : 'pc-even'}],
+    }
+
+    // dotted separator
+    if ((j > 0) && (pc - pcs[j - 1] > 4)) {
+      mLane.push(['line', {class: 'gap', x1: 0, y1: 0, x2: width, y2: 0}]);
+    }
+
+    // row header
+    mLane.push(['text', {class: 'pc', 'xml:space': 'preserve', y: Math.round(yStep * .7)},
+      ['tspan', {class: 'pc-addr'}, parseInt(pc, 10).toString(16).padStart(12, ' ')],
+      ['tspan', {class: 'pc-opcode'}, pcd.op.padStart(9, ' ')],
+      ' ',
+      ['tspan', {class: 'pc-asm'}, asm]
+    ]);
+
+    // bricks in row
+    pcd.bricks.map(e => {
+      mLane.push(['g', tt(Math.round(getX(pstate, e.t))),
+        ['rect', {
+          class: (e.label === '') ? e.name : 'ct' + hash(e.name).toString(36),
+          width: brickWidth,
+          height: (e.tail ? (yStep >> 1) : yStep) - 3,
+          y: e.tail ? ((yStep >> 1) + 1) : 1,
+          'data-stage': e.label
+        }],
+        ...((brickWidth > 20) ? [['text', {class: e.name, width: brickWidth, x: brickWidth / 2, y: 16}, e.label]] : [])
+      ]);
+    });
+
+    mLanes.push(mLane);
+  }
+  return mLanes;
+};
+
+
+module.exports = water;
+
+},{"./get-x.js":19,"./hash.js":20,"./sampler.js":30,"./surferer.js":31,"onml/tt.js":184}],36:[function(require,module,exports){
+'use strict';
+
+const xOffsetUpdate = (pstate, xOffsetNext) => {
+  let {width, xOffset, xScale, time, sidebarWidth} = pstate;
+
+  const xOffsetMax = sidebarWidth; // maximum offset
+  xOffsetNext = (xOffsetNext > xOffsetMax) ? xOffsetMax : xOffsetNext;
+
+  const xOffsetMin = width - xScale * time; // minimum offset
+  xOffsetNext = (xOffsetNext < xOffsetMin) ? xOffsetMin : xOffsetNext;
+
+  if (xOffsetNext === xOffset) {
+    return false; // exit without scroll
+  }
+
+  pstate.xOffset = xOffsetNext;
+  return true;
+};
+
+module.exports = xOffsetUpdate;
+
+},{}],37:[function(require,module,exports){
+'use strict';
+
+const xOffsetUpdate = require('./x-offset-update.js');
+
+const xScaleUpdate = (pstate, xScaleNext) => {
+  const {xOffset, xCursor, xScale, xScaleMin, xScaleMax} = pstate;
+
+  xScaleNext = (xScaleNext > xScaleMax) ? xScaleMax : xScaleNext;
+
+  xScaleNext = (xScaleNext < xScaleMin) ? xScaleMin : xScaleNext;
+
+  if (xScaleNext === xScale) {
+    return false; // exit without scale change
+  }
+  pstate.xScale = xScaleNext;
+
+  xOffsetUpdate(pstate, xCursor - (xCursor - xOffset) * xScaleNext / xScale);
+  return true;
+};
+
+module.exports = xScaleUpdate;
+
+},{"./x-offset-update.js":36}],38:[function(require,module,exports){
 'use strict';
 
 const asn1 = exports;
@@ -29889,7 +26217,7 @@ asn1.constants = require('./asn1/constants');
 asn1.decoders = require('./asn1/decoders');
 asn1.encoders = require('./asn1/encoders');
 
-},{"./asn1/api":74,"./asn1/base":76,"./asn1/constants":80,"./asn1/decoders":82,"./asn1/encoders":85,"bn.js":87}],74:[function(require,module,exports){
+},{"./asn1/api":39,"./asn1/base":41,"./asn1/constants":45,"./asn1/decoders":47,"./asn1/encoders":50,"bn.js":52}],39:[function(require,module,exports){
 'use strict';
 
 const encoders = require('./encoders');
@@ -29948,7 +26276,7 @@ Entity.prototype.encode = function encode(data, enc, /* internal */ reporter) {
   return this._getEncoder(enc).encode(data, reporter);
 };
 
-},{"./decoders":82,"./encoders":85,"inherits":205}],75:[function(require,module,exports){
+},{"./decoders":47,"./encoders":50,"inherits":171}],40:[function(require,module,exports){
 'use strict';
 
 const inherits = require('inherits');
@@ -30103,7 +26431,7 @@ EncoderBuffer.prototype.join = function join(out, offset) {
   return out;
 };
 
-},{"../base/reporter":78,"inherits":205,"safer-buffer":235}],76:[function(require,module,exports){
+},{"../base/reporter":43,"inherits":171,"safer-buffer":209}],41:[function(require,module,exports){
 'use strict';
 
 const base = exports;
@@ -30113,7 +26441,7 @@ base.DecoderBuffer = require('./buffer').DecoderBuffer;
 base.EncoderBuffer = require('./buffer').EncoderBuffer;
 base.Node = require('./node');
 
-},{"./buffer":75,"./node":77,"./reporter":78}],77:[function(require,module,exports){
+},{"./buffer":40,"./node":42,"./reporter":43}],42:[function(require,module,exports){
 'use strict';
 
 const Reporter = require('../base/reporter').Reporter;
@@ -30753,7 +27081,7 @@ Node.prototype._isPrintstr = function isPrintstr(str) {
   return /^[A-Za-z0-9 '()+,-./:=?]*$/.test(str);
 };
 
-},{"../base/buffer":75,"../base/reporter":78,"minimalistic-assert":209}],78:[function(require,module,exports){
+},{"../base/buffer":40,"../base/reporter":43,"minimalistic-assert":176}],43:[function(require,module,exports){
 'use strict';
 
 const inherits = require('inherits');
@@ -30878,7 +27206,7 @@ ReporterError.prototype.rethrow = function rethrow(msg) {
   return this;
 };
 
-},{"inherits":205}],79:[function(require,module,exports){
+},{"inherits":171}],44:[function(require,module,exports){
 'use strict';
 
 // Helper
@@ -30938,7 +27266,7 @@ exports.tag = {
 };
 exports.tagByName = reverse(exports.tag);
 
-},{}],80:[function(require,module,exports){
+},{}],45:[function(require,module,exports){
 'use strict';
 
 const constants = exports;
@@ -30961,7 +27289,7 @@ constants._reverse = function reverse(map) {
 
 constants.der = require('./der');
 
-},{"./der":79}],81:[function(require,module,exports){
+},{"./der":44}],46:[function(require,module,exports){
 'use strict';
 
 const inherits = require('inherits');
@@ -31298,7 +27626,7 @@ function derDecodeLen(buf, primitive, fail) {
   return len;
 }
 
-},{"../base/buffer":75,"../base/node":77,"../constants/der":79,"bn.js":87,"inherits":205}],82:[function(require,module,exports){
+},{"../base/buffer":40,"../base/node":42,"../constants/der":44,"bn.js":52,"inherits":171}],47:[function(require,module,exports){
 'use strict';
 
 const decoders = exports;
@@ -31306,7 +27634,7 @@ const decoders = exports;
 decoders.der = require('./der');
 decoders.pem = require('./pem');
 
-},{"./der":81,"./pem":83}],83:[function(require,module,exports){
+},{"./der":46,"./pem":48}],48:[function(require,module,exports){
 'use strict';
 
 const inherits = require('inherits');
@@ -31359,7 +27687,7 @@ PEMDecoder.prototype.decode = function decode(data, options) {
   return DERDecoder.prototype.decode.call(this, input, options);
 };
 
-},{"./der":81,"inherits":205,"safer-buffer":235}],84:[function(require,module,exports){
+},{"./der":46,"inherits":171,"safer-buffer":209}],49:[function(require,module,exports){
 'use strict';
 
 const inherits = require('inherits');
@@ -31656,7 +27984,7 @@ function encodeTag(tag, primitive, cls, reporter) {
   return res;
 }
 
-},{"../base/node":77,"../constants/der":79,"inherits":205,"safer-buffer":235}],85:[function(require,module,exports){
+},{"../base/node":42,"../constants/der":44,"inherits":171,"safer-buffer":209}],50:[function(require,module,exports){
 'use strict';
 
 const encoders = exports;
@@ -31664,7 +27992,7 @@ const encoders = exports;
 encoders.der = require('./der');
 encoders.pem = require('./pem');
 
-},{"./der":84,"./pem":86}],86:[function(require,module,exports){
+},{"./der":49,"./pem":51}],51:[function(require,module,exports){
 'use strict';
 
 const inherits = require('inherits');
@@ -31689,7 +28017,7 @@ PEMEncoder.prototype.encode = function encode(data, options) {
   return out.join('\n');
 };
 
-},{"./der":84,"inherits":205}],87:[function(require,module,exports){
+},{"./der":49,"inherits":171}],52:[function(require,module,exports){
 (function (module, exports) {
   'use strict';
 
@@ -35137,7 +31465,7 @@ PEMEncoder.prototype.encode = function encode(data, options) {
   };
 })(typeof module === 'undefined' || module, this);
 
-},{"buffer":91}],88:[function(require,module,exports){
+},{"buffer":56}],53:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -35289,7 +31617,7 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],89:[function(require,module,exports){
+},{}],54:[function(require,module,exports){
 (function (module, exports) {
   'use strict';
 
@@ -38838,7 +35166,7 @@ function fromByteArray (uint8) {
   };
 })(typeof module === 'undefined' || module, this);
 
-},{"buffer":91}],90:[function(require,module,exports){
+},{"buffer":56}],55:[function(require,module,exports){
 var r;
 
 module.exports = function rand(len) {
@@ -38905,9 +35233,9 @@ if (typeof self === 'object') {
   }
 }
 
-},{"crypto":91}],91:[function(require,module,exports){
+},{"crypto":56}],56:[function(require,module,exports){
 
-},{}],92:[function(require,module,exports){
+},{}],57:[function(require,module,exports){
 // based on the aes implimentation in triple sec
 // https://github.com/keybase/triplesec
 // which is in turn based on the one from crypto-js
@@ -39137,7 +35465,7 @@ AES.prototype.scrub = function () {
 
 module.exports.AES = AES
 
-},{"safe-buffer":234}],93:[function(require,module,exports){
+},{"safe-buffer":208}],58:[function(require,module,exports){
 var aes = require('./aes')
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('cipher-base')
@@ -39256,7 +35584,7 @@ StreamCipher.prototype.setAAD = function setAAD (buf) {
 
 module.exports = StreamCipher
 
-},{"./aes":92,"./ghash":97,"./incr32":98,"buffer-xor":135,"cipher-base":137,"inherits":205,"safe-buffer":234}],94:[function(require,module,exports){
+},{"./aes":57,"./ghash":62,"./incr32":63,"buffer-xor":100,"cipher-base":102,"inherits":171,"safe-buffer":208}],59:[function(require,module,exports){
 var ciphers = require('./encrypter')
 var deciphers = require('./decrypter')
 var modes = require('./modes/list.json')
@@ -39271,7 +35599,7 @@ exports.createDecipher = exports.Decipher = deciphers.createDecipher
 exports.createDecipheriv = exports.Decipheriv = deciphers.createDecipheriv
 exports.listCiphers = exports.getCiphers = getCiphers
 
-},{"./decrypter":95,"./encrypter":96,"./modes/list.json":106}],95:[function(require,module,exports){
+},{"./decrypter":60,"./encrypter":61,"./modes/list.json":71}],60:[function(require,module,exports){
 var AuthCipher = require('./authCipher')
 var Buffer = require('safe-buffer').Buffer
 var MODES = require('./modes')
@@ -39397,7 +35725,7 @@ function createDecipher (suite, password) {
 exports.createDecipher = createDecipher
 exports.createDecipheriv = createDecipheriv
 
-},{"./aes":92,"./authCipher":93,"./modes":105,"./streamCipher":108,"cipher-base":137,"evp_bytestokey":174,"inherits":205,"safe-buffer":234}],96:[function(require,module,exports){
+},{"./aes":57,"./authCipher":58,"./modes":70,"./streamCipher":73,"cipher-base":102,"evp_bytestokey":140,"inherits":171,"safe-buffer":208}],61:[function(require,module,exports){
 var MODES = require('./modes')
 var AuthCipher = require('./authCipher')
 var Buffer = require('safe-buffer').Buffer
@@ -39513,7 +35841,7 @@ function createCipher (suite, password) {
 exports.createCipheriv = createCipheriv
 exports.createCipher = createCipher
 
-},{"./aes":92,"./authCipher":93,"./modes":105,"./streamCipher":108,"cipher-base":137,"evp_bytestokey":174,"inherits":205,"safe-buffer":234}],97:[function(require,module,exports){
+},{"./aes":57,"./authCipher":58,"./modes":70,"./streamCipher":73,"cipher-base":102,"evp_bytestokey":140,"inherits":171,"safe-buffer":208}],62:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var ZEROES = Buffer.alloc(16, 0)
 
@@ -39604,7 +35932,7 @@ GHASH.prototype.final = function (abl, bl) {
 
 module.exports = GHASH
 
-},{"safe-buffer":234}],98:[function(require,module,exports){
+},{"safe-buffer":208}],63:[function(require,module,exports){
 function incr32 (iv) {
   var len = iv.length
   var item
@@ -39621,7 +35949,7 @@ function incr32 (iv) {
 }
 module.exports = incr32
 
-},{}],99:[function(require,module,exports){
+},{}],64:[function(require,module,exports){
 var xor = require('buffer-xor')
 
 exports.encrypt = function (self, block) {
@@ -39640,7 +35968,7 @@ exports.decrypt = function (self, block) {
   return xor(out, pad)
 }
 
-},{"buffer-xor":135}],100:[function(require,module,exports){
+},{"buffer-xor":100}],65:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var xor = require('buffer-xor')
 
@@ -39675,7 +36003,7 @@ exports.encrypt = function (self, data, decrypt) {
   return out
 }
 
-},{"buffer-xor":135,"safe-buffer":234}],101:[function(require,module,exports){
+},{"buffer-xor":100,"safe-buffer":208}],66:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 function encryptByte (self, byteParam, decrypt) {
@@ -39719,7 +36047,7 @@ exports.encrypt = function (self, chunk, decrypt) {
   return out
 }
 
-},{"safe-buffer":234}],102:[function(require,module,exports){
+},{"safe-buffer":208}],67:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 function encryptByte (self, byteParam, decrypt) {
@@ -39746,7 +36074,7 @@ exports.encrypt = function (self, chunk, decrypt) {
   return out
 }
 
-},{"safe-buffer":234}],103:[function(require,module,exports){
+},{"safe-buffer":208}],68:[function(require,module,exports){
 var xor = require('buffer-xor')
 var Buffer = require('safe-buffer').Buffer
 var incr32 = require('../incr32')
@@ -39778,7 +36106,7 @@ exports.encrypt = function (self, chunk) {
   return xor(chunk, pad)
 }
 
-},{"../incr32":98,"buffer-xor":135,"safe-buffer":234}],104:[function(require,module,exports){
+},{"../incr32":63,"buffer-xor":100,"safe-buffer":208}],69:[function(require,module,exports){
 exports.encrypt = function (self, block) {
   return self._cipher.encryptBlock(block)
 }
@@ -39787,7 +36115,7 @@ exports.decrypt = function (self, block) {
   return self._cipher.decryptBlock(block)
 }
 
-},{}],105:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 var modeModules = {
   ECB: require('./ecb'),
   CBC: require('./cbc'),
@@ -39807,7 +36135,7 @@ for (var key in modes) {
 
 module.exports = modes
 
-},{"./cbc":99,"./cfb":100,"./cfb1":101,"./cfb8":102,"./ctr":103,"./ecb":104,"./list.json":106,"./ofb":107}],106:[function(require,module,exports){
+},{"./cbc":64,"./cfb":65,"./cfb1":66,"./cfb8":67,"./ctr":68,"./ecb":69,"./list.json":71,"./ofb":72}],71:[function(require,module,exports){
 module.exports={
   "aes-128-ecb": {
     "cipher": "AES",
@@ -40000,7 +36328,7 @@ module.exports={
   }
 }
 
-},{}],107:[function(require,module,exports){
+},{}],72:[function(require,module,exports){
 (function (Buffer){(function (){
 var xor = require('buffer-xor')
 
@@ -40020,7 +36348,7 @@ exports.encrypt = function (self, chunk) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":136,"buffer-xor":135}],108:[function(require,module,exports){
+},{"buffer":101,"buffer-xor":100}],73:[function(require,module,exports){
 var aes = require('./aes')
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('cipher-base')
@@ -40049,7 +36377,7 @@ StreamCipher.prototype._final = function () {
 
 module.exports = StreamCipher
 
-},{"./aes":92,"cipher-base":137,"inherits":205,"safe-buffer":234}],109:[function(require,module,exports){
+},{"./aes":57,"cipher-base":102,"inherits":171,"safe-buffer":208}],74:[function(require,module,exports){
 var DES = require('browserify-des')
 var aes = require('browserify-aes/browser')
 var aesModes = require('browserify-aes/modes')
@@ -40118,7 +36446,7 @@ exports.createDecipher = exports.Decipher = createDecipher
 exports.createDecipheriv = exports.Decipheriv = createDecipheriv
 exports.listCiphers = exports.getCiphers = getCiphers
 
-},{"browserify-aes/browser":94,"browserify-aes/modes":105,"browserify-des":110,"browserify-des/modes":111,"evp_bytestokey":174}],110:[function(require,module,exports){
+},{"browserify-aes/browser":59,"browserify-aes/modes":70,"browserify-des":75,"browserify-des/modes":76,"evp_bytestokey":140}],75:[function(require,module,exports){
 var CipherBase = require('cipher-base')
 var des = require('des.js')
 var inherits = require('inherits')
@@ -40170,7 +36498,7 @@ DES.prototype._final = function () {
   return Buffer.from(this._des.final())
 }
 
-},{"cipher-base":137,"des.js":145,"inherits":205,"safe-buffer":234}],111:[function(require,module,exports){
+},{"cipher-base":102,"des.js":110,"inherits":171,"safe-buffer":208}],76:[function(require,module,exports){
 exports['des-ecb'] = {
   key: 8,
   iv: 0
@@ -40196,7 +36524,7 @@ exports['des-ede'] = {
   iv: 0
 }
 
-},{}],112:[function(require,module,exports){
+},{}],77:[function(require,module,exports){
 (function (Buffer){(function (){
 var BN = require('bn.js')
 var randomBytes = require('randombytes')
@@ -40235,12 +36563,12 @@ crt.getr = getr
 module.exports = crt
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"bn.js":89,"buffer":136,"randombytes":231}],113:[function(require,module,exports){
+},{"bn.js":54,"buffer":101,"randombytes":205}],78:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./browser/algorithms.json');
 
-},{"./browser/algorithms.json":114}],114:[function(require,module,exports){
+},{"./browser/algorithms.json":79}],79:[function(require,module,exports){
 module.exports={
   "sha224WithRSAEncryption": {
     "sign": "rsa",
@@ -40394,7 +36722,7 @@ module.exports={
   }
 }
 
-},{}],115:[function(require,module,exports){
+},{}],80:[function(require,module,exports){
 module.exports={
   "1.3.132.0.10": "secp256k1",
   "1.3.132.0.33": "p224",
@@ -40404,7 +36732,7 @@ module.exports={
   "1.3.132.0.35": "p521"
 }
 
-},{}],116:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 'use strict';
 
 var Buffer = require('safe-buffer').Buffer;
@@ -40498,7 +36826,7 @@ module.exports = {
   createVerify: createVerify
 };
 
-},{"./algorithms.json":114,"./sign":117,"./verify":118,"create-hash":140,"inherits":205,"readable-stream":133,"safe-buffer":234}],117:[function(require,module,exports){
+},{"./algorithms.json":79,"./sign":82,"./verify":83,"create-hash":105,"inherits":171,"readable-stream":98,"safe-buffer":208}],82:[function(require,module,exports){
 'use strict';
 
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
@@ -40650,7 +36978,7 @@ module.exports = sign;
 module.exports.getKey = getKey;
 module.exports.makeKey = makeKey;
 
-},{"./curves.json":115,"bn.js":89,"browserify-rsa":112,"create-hmac":142,"elliptic":156,"parse-asn1":215,"safe-buffer":234}],118:[function(require,module,exports){
+},{"./curves.json":80,"bn.js":54,"browserify-rsa":77,"create-hmac":107,"elliptic":122,"parse-asn1":189,"safe-buffer":208}],83:[function(require,module,exports){
 'use strict';
 
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
@@ -40738,7 +37066,7 @@ function checkValue(b, q) {
 
 module.exports = verify;
 
-},{"./curves.json":115,"bn.js":89,"elliptic":156,"parse-asn1":215,"safe-buffer":234}],119:[function(require,module,exports){
+},{"./curves.json":80,"bn.js":54,"elliptic":122,"parse-asn1":189,"safe-buffer":208}],84:[function(require,module,exports){
 'use strict';
 
 function _inheritsLoose(subClass, superClass) { subClass.prototype = Object.create(superClass.prototype); subClass.prototype.constructor = subClass; subClass.__proto__ = superClass; }
@@ -40867,7 +37195,7 @@ createErrorType('ERR_UNKNOWN_ENCODING', function (arg) {
 createErrorType('ERR_STREAM_UNSHIFT_AFTER_END_EVENT', 'stream.unshift() after end event');
 module.exports.codes = codes;
 
-},{}],120:[function(require,module,exports){
+},{}],85:[function(require,module,exports){
 (function (process){(function (){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -40996,7 +37324,7 @@ Object.defineProperty(Duplex.prototype, 'destroyed', {
   }
 });
 }).call(this)}).call(this,require('_process'))
-},{"./_stream_readable":122,"./_stream_writable":124,"_process":223,"inherits":205}],121:[function(require,module,exports){
+},{"./_stream_readable":87,"./_stream_writable":89,"_process":197,"inherits":171}],86:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -41034,7 +37362,7 @@ function PassThrough(options) {
 PassThrough.prototype._transform = function (chunk, encoding, cb) {
   cb(null, chunk);
 };
-},{"./_stream_transform":123,"inherits":205}],122:[function(require,module,exports){
+},{"./_stream_transform":88,"inherits":171}],87:[function(require,module,exports){
 (function (process,global){(function (){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -42064,7 +38392,7 @@ function indexOf(xs, x) {
   return -1;
 }
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../errors":119,"./_stream_duplex":120,"./internal/streams/async_iterator":125,"./internal/streams/buffer_list":126,"./internal/streams/destroy":127,"./internal/streams/from":129,"./internal/streams/state":131,"./internal/streams/stream":132,"_process":223,"buffer":136,"events":173,"inherits":205,"string_decoder/":259,"util":91}],123:[function(require,module,exports){
+},{"../errors":84,"./_stream_duplex":85,"./internal/streams/async_iterator":90,"./internal/streams/buffer_list":91,"./internal/streams/destroy":92,"./internal/streams/from":94,"./internal/streams/state":96,"./internal/streams/stream":97,"_process":197,"buffer":101,"events":139,"inherits":171,"string_decoder/":234,"util":56}],88:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -42255,7 +38583,7 @@ function done(stream, er, data) {
   if (stream._transformState.transforming) throw new ERR_TRANSFORM_ALREADY_TRANSFORMING();
   return stream.push(null);
 }
-},{"../errors":119,"./_stream_duplex":120,"inherits":205}],124:[function(require,module,exports){
+},{"../errors":84,"./_stream_duplex":85,"inherits":171}],89:[function(require,module,exports){
 (function (process,global){(function (){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -42899,7 +39227,7 @@ Writable.prototype._destroy = function (err, cb) {
   cb(err);
 };
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../errors":119,"./_stream_duplex":120,"./internal/streams/destroy":127,"./internal/streams/state":131,"./internal/streams/stream":132,"_process":223,"buffer":136,"inherits":205,"util-deprecate":262}],125:[function(require,module,exports){
+},{"../errors":84,"./_stream_duplex":85,"./internal/streams/destroy":92,"./internal/streams/state":96,"./internal/streams/stream":97,"_process":197,"buffer":101,"inherits":171,"util-deprecate":236}],90:[function(require,module,exports){
 (function (process){(function (){
 'use strict';
 
@@ -43082,7 +39410,7 @@ var createReadableStreamAsyncIterator = function createReadableStreamAsyncIterat
 };
 module.exports = createReadableStreamAsyncIterator;
 }).call(this)}).call(this,require('_process'))
-},{"./end-of-stream":128,"_process":223}],126:[function(require,module,exports){
+},{"./end-of-stream":93,"_process":197}],91:[function(require,module,exports){
 'use strict';
 
 function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); enumerableOnly && (symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; })), keys.push.apply(keys, symbols); } return keys; }
@@ -43266,7 +39594,7 @@ module.exports = /*#__PURE__*/function () {
   }]);
   return BufferList;
 }();
-},{"buffer":136,"util":91}],127:[function(require,module,exports){
+},{"buffer":101,"util":56}],92:[function(require,module,exports){
 (function (process){(function (){
 'use strict';
 
@@ -43365,7 +39693,7 @@ module.exports = {
   errorOrDestroy: errorOrDestroy
 };
 }).call(this)}).call(this,require('_process'))
-},{"_process":223}],128:[function(require,module,exports){
+},{"_process":197}],93:[function(require,module,exports){
 // Ported from https://github.com/mafintosh/end-of-stream with
 // permission from the author, Mathias Buus (@mafintosh).
 
@@ -43452,12 +39780,12 @@ function eos(stream, opts, callback) {
   };
 }
 module.exports = eos;
-},{"../../../errors":119}],129:[function(require,module,exports){
+},{"../../../errors":84}],94:[function(require,module,exports){
 module.exports = function () {
   throw new Error('Readable.from is not available in the browser')
 };
 
-},{}],130:[function(require,module,exports){
+},{}],95:[function(require,module,exports){
 // Ported from https://github.com/mafintosh/pump with
 // permission from the author, Mathias Buus (@mafintosh).
 
@@ -43544,7 +39872,7 @@ function pipeline() {
   return streams.reduce(pipe);
 }
 module.exports = pipeline;
-},{"../../../errors":119,"./end-of-stream":128}],131:[function(require,module,exports){
+},{"../../../errors":84,"./end-of-stream":93}],96:[function(require,module,exports){
 'use strict';
 
 var ERR_INVALID_OPT_VALUE = require('../../../errors').codes.ERR_INVALID_OPT_VALUE;
@@ -43567,10 +39895,10 @@ function getHighWaterMark(state, options, duplexKey, isDuplex) {
 module.exports = {
   getHighWaterMark: getHighWaterMark
 };
-},{"../../../errors":119}],132:[function(require,module,exports){
+},{"../../../errors":84}],97:[function(require,module,exports){
 module.exports = require('events').EventEmitter;
 
-},{"events":173}],133:[function(require,module,exports){
+},{"events":139}],98:[function(require,module,exports){
 exports = module.exports = require('./lib/_stream_readable.js');
 exports.Stream = exports;
 exports.Readable = exports;
@@ -43581,9 +39909,9 @@ exports.PassThrough = require('./lib/_stream_passthrough.js');
 exports.finished = require('./lib/internal/streams/end-of-stream.js');
 exports.pipeline = require('./lib/internal/streams/pipeline.js');
 
-},{"./lib/_stream_duplex.js":120,"./lib/_stream_passthrough.js":121,"./lib/_stream_readable.js":122,"./lib/_stream_transform.js":123,"./lib/_stream_writable.js":124,"./lib/internal/streams/end-of-stream.js":128,"./lib/internal/streams/pipeline.js":130}],134:[function(require,module,exports){
-arguments[4][91][0].apply(exports,arguments)
-},{"dup":91}],135:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":85,"./lib/_stream_passthrough.js":86,"./lib/_stream_readable.js":87,"./lib/_stream_transform.js":88,"./lib/_stream_writable.js":89,"./lib/internal/streams/end-of-stream.js":93,"./lib/internal/streams/pipeline.js":95}],99:[function(require,module,exports){
+arguments[4][56][0].apply(exports,arguments)
+},{"dup":56}],100:[function(require,module,exports){
 (function (Buffer){(function (){
 module.exports = function xor (a, b) {
   var length = Math.min(a.length, b.length)
@@ -43597,7 +39925,7 @@ module.exports = function xor (a, b) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":136}],136:[function(require,module,exports){
+},{"buffer":101}],101:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -45378,7 +41706,7 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":88,"buffer":136,"ieee754":204}],137:[function(require,module,exports){
+},{"base64-js":53,"buffer":101,"ieee754":170}],102:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('stream').Transform
 var StringDecoder = require('string_decoder').StringDecoder
@@ -45479,7 +41807,7 @@ CipherBase.prototype._toString = function (value, enc, fin) {
 
 module.exports = CipherBase
 
-},{"inherits":205,"safe-buffer":234,"stream":244,"string_decoder":259}],138:[function(require,module,exports){
+},{"inherits":171,"safe-buffer":208,"stream":219,"string_decoder":234}],103:[function(require,module,exports){
 (function (Buffer){(function (){
 var elliptic = require('elliptic')
 var BN = require('bn.js')
@@ -45607,9 +41935,9 @@ function formatReturnValue (bn, enc, len) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"bn.js":139,"buffer":136,"elliptic":156}],139:[function(require,module,exports){
-arguments[4][87][0].apply(exports,arguments)
-},{"buffer":91,"dup":87}],140:[function(require,module,exports){
+},{"bn.js":104,"buffer":101,"elliptic":122}],104:[function(require,module,exports){
+arguments[4][52][0].apply(exports,arguments)
+},{"buffer":56,"dup":52}],105:[function(require,module,exports){
 'use strict'
 var inherits = require('inherits')
 var MD5 = require('md5.js')
@@ -45641,14 +41969,14 @@ module.exports = function createHash (alg) {
   return new Hash(sha(alg))
 }
 
-},{"cipher-base":137,"inherits":205,"md5.js":206,"ripemd160":233,"sha.js":237}],141:[function(require,module,exports){
+},{"cipher-base":102,"inherits":171,"md5.js":173,"ripemd160":207,"sha.js":212}],106:[function(require,module,exports){
 var MD5 = require('md5.js')
 
 module.exports = function (buffer) {
   return new MD5().update(buffer).digest()
 }
 
-},{"md5.js":206}],142:[function(require,module,exports){
+},{"md5.js":173}],107:[function(require,module,exports){
 'use strict'
 var inherits = require('inherits')
 var Legacy = require('./legacy')
@@ -45712,7 +42040,7 @@ module.exports = function createHmac (alg, key) {
   return new Hmac(alg, key)
 }
 
-},{"./legacy":143,"cipher-base":137,"create-hash/md5":141,"inherits":205,"ripemd160":233,"safe-buffer":234,"sha.js":237}],143:[function(require,module,exports){
+},{"./legacy":108,"cipher-base":102,"create-hash/md5":106,"inherits":171,"ripemd160":207,"safe-buffer":208,"sha.js":212}],108:[function(require,module,exports){
 'use strict'
 var inherits = require('inherits')
 var Buffer = require('safe-buffer').Buffer
@@ -45760,7 +42088,7 @@ Hmac.prototype._final = function () {
 }
 module.exports = Hmac
 
-},{"cipher-base":137,"inherits":205,"safe-buffer":234}],144:[function(require,module,exports){
+},{"cipher-base":102,"inherits":171,"safe-buffer":208}],109:[function(require,module,exports){
 'use strict'
 
 exports.randomBytes = exports.rng = exports.pseudoRandomBytes = exports.prng = require('randombytes')
@@ -45859,7 +42187,7 @@ exports.constants = {
   'POINT_CONVERSION_HYBRID': 6
 }
 
-},{"browserify-cipher":109,"browserify-sign":116,"browserify-sign/algos":113,"create-ecdh":138,"create-hash":140,"create-hmac":142,"diffie-hellman":151,"pbkdf2":217,"public-encrypt":224,"randombytes":231,"randomfill":232}],145:[function(require,module,exports){
+},{"browserify-cipher":74,"browserify-sign":81,"browserify-sign/algos":78,"create-ecdh":103,"create-hash":105,"create-hmac":107,"diffie-hellman":116,"pbkdf2":191,"public-encrypt":198,"randombytes":205,"randomfill":206}],110:[function(require,module,exports){
 'use strict';
 
 exports.utils = require('./des/utils');
@@ -45868,7 +42196,7 @@ exports.DES = require('./des/des');
 exports.CBC = require('./des/cbc');
 exports.EDE = require('./des/ede');
 
-},{"./des/cbc":146,"./des/cipher":147,"./des/des":148,"./des/ede":149,"./des/utils":150}],146:[function(require,module,exports){
+},{"./des/cbc":111,"./des/cipher":112,"./des/des":113,"./des/ede":114,"./des/utils":115}],111:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -45935,7 +42263,7 @@ proto._update = function _update(inp, inOff, out, outOff) {
   }
 };
 
-},{"inherits":205,"minimalistic-assert":209}],147:[function(require,module,exports){
+},{"inherits":171,"minimalistic-assert":176}],112:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -46079,7 +42407,7 @@ Cipher.prototype._finalDecrypt = function _finalDecrypt() {
   return this._unpad(out);
 };
 
-},{"minimalistic-assert":209}],148:[function(require,module,exports){
+},{"minimalistic-assert":176}],113:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -46231,7 +42559,7 @@ DES.prototype._decrypt = function _decrypt(state, lStart, rStart, out, off) {
   utils.rip(l, r, out, off);
 };
 
-},{"./cipher":147,"./utils":150,"inherits":205,"minimalistic-assert":209}],149:[function(require,module,exports){
+},{"./cipher":112,"./utils":115,"inherits":171,"minimalistic-assert":176}],114:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -46287,7 +42615,7 @@ EDE.prototype._update = function _update(inp, inOff, out, outOff) {
 EDE.prototype._pad = DES.prototype._pad;
 EDE.prototype._unpad = DES.prototype._unpad;
 
-},{"./cipher":147,"./des":148,"inherits":205,"minimalistic-assert":209}],150:[function(require,module,exports){
+},{"./cipher":112,"./des":113,"inherits":171,"minimalistic-assert":176}],115:[function(require,module,exports){
 'use strict';
 
 exports.readUInt32BE = function readUInt32BE(bytes, off) {
@@ -46545,7 +42873,7 @@ exports.padSplit = function padSplit(num, size, group) {
   return out.join(' ');
 };
 
-},{}],151:[function(require,module,exports){
+},{}],116:[function(require,module,exports){
 (function (Buffer){(function (){
 var generatePrime = require('./lib/generatePrime')
 var primes = require('./lib/primes.json')
@@ -46591,7 +42919,7 @@ exports.DiffieHellmanGroup = exports.createDiffieHellmanGroup = exports.getDiffi
 exports.createDiffieHellman = exports.DiffieHellman = createDiffieHellman
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"./lib/dh":152,"./lib/generatePrime":153,"./lib/primes.json":154,"buffer":136}],152:[function(require,module,exports){
+},{"./lib/dh":117,"./lib/generatePrime":118,"./lib/primes.json":119,"buffer":101}],117:[function(require,module,exports){
 (function (Buffer){(function (){
 var BN = require('bn.js');
 var MillerRabin = require('miller-rabin');
@@ -46759,7 +43087,7 @@ function formatReturnValue(bn, enc) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"./generatePrime":153,"bn.js":155,"buffer":136,"miller-rabin":207,"randombytes":231}],153:[function(require,module,exports){
+},{"./generatePrime":118,"bn.js":120,"buffer":101,"miller-rabin":174,"randombytes":205}],118:[function(require,module,exports){
 var randomBytes = require('randombytes');
 module.exports = findPrime;
 findPrime.simpleSieve = simpleSieve;
@@ -46866,7 +43194,7 @@ function findPrime(bits, gen) {
 
 }
 
-},{"bn.js":155,"miller-rabin":207,"randombytes":231}],154:[function(require,module,exports){
+},{"bn.js":120,"miller-rabin":174,"randombytes":205}],119:[function(require,module,exports){
 module.exports={
     "modp1": {
         "gen": "02",
@@ -46901,9 +43229,149 @@ module.exports={
         "prime": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aaac42dad33170d04507a33a85521abdf1cba64ecfb850458dbef0a8aea71575d060c7db3970f85a6e1e4c7abf5ae8cdb0933d71e8c94e04a25619dcee3d2261ad2ee6bf12ffa06d98a0864d87602733ec86a64521f2b18177b200cbbe117577a615d6c770988c0bad946e208e24fa074e5ab3143db5bfce0fd108e4b82d120a92108011a723c12a787e6d788719a10bdba5b2699c327186af4e23c1a946834b6150bda2583e9ca2ad44ce8dbbbc2db04de8ef92e8efc141fbecaa6287c59474e6bc05d99b2964fa090c3a2233ba186515be7ed1f612970cee2d7afb81bdd762170481cd0069127d5b05aa993b4ea988d8fddc186ffb7dc90a6c08f4df435c93402849236c3fab4d27c7026c1d4dcb2602646dec9751e763dba37bdf8ff9406ad9e530ee5db382f413001aeb06a53ed9027d831179727b0865a8918da3edbebcf9b14ed44ce6cbaced4bb1bdb7f1447e6cc254b332051512bd7af426fb8f401378cd2bf5983ca01c64b92ecf032ea15d1721d03f482d7ce6e74fef6d55e702f46980c82b5a84031900b1c9e59e7c97fbec7e8f323a97a7e36cc88be0f1d45b7ff585ac54bd407b22b4154aacc8f6d7ebf48e1d814cc5ed20f8037e0a79715eef29be32806a1d58bb7c5da76f550aa3d8a1fbff0eb19ccb1a313d55cda56c9ec2ef29632387fe8d76e3c0468043e8f663f4860ee12bf2d5b0b7474d6e694f91e6dbe115974a3926f12fee5e438777cb6a932df8cd8bec4d073b931ba3bc832b68d9dd300741fa7bf8afc47ed2576f6936ba424663aab639c5ae4f5683423b4742bf1c978238f16cbe39d652de3fdb8befc848ad922222e04a4037c0713eb57a81a23f0c73473fc646cea306b4bcbc8862f8385ddfa9d4b7fa2c087e879683303ed5bdd3a062b3cf5b3a278a66d2a13f83f44f82ddf310ee074ab6a364597e899a0255dc164f31cc50846851df9ab48195ded7ea1b1d510bd7ee74d73faf36bc31ecfa268359046f4eb879f924009438b481c6cd7889a002ed5ee382bc9190da6fc026e479558e4475677e9aa9e3050e2765694dfc81f56e880b96e7160c980dd98edd3dfffffffffffffffff"
     }
 }
-},{}],155:[function(require,module,exports){
-arguments[4][87][0].apply(exports,arguments)
-},{"buffer":91,"dup":87}],156:[function(require,module,exports){
+},{}],120:[function(require,module,exports){
+arguments[4][52][0].apply(exports,arguments)
+},{"buffer":56,"dup":52}],121:[function(require,module,exports){
+'use strict';
+const isObj = require('is-obj');
+
+const disallowedKeys = new Set([
+	'__proto__',
+	'prototype',
+	'constructor'
+]);
+
+const isValidPath = pathSegments => !pathSegments.some(segment => disallowedKeys.has(segment));
+
+function getPathSegments(path) {
+	const pathArray = path.split('.');
+	const parts = [];
+
+	for (let i = 0; i < pathArray.length; i++) {
+		let p = pathArray[i];
+
+		while (p[p.length - 1] === '\\' && pathArray[i + 1] !== undefined) {
+			p = p.slice(0, -1) + '.';
+			p += pathArray[++i];
+		}
+
+		parts.push(p);
+	}
+
+	if (!isValidPath(parts)) {
+		return [];
+	}
+
+	return parts;
+}
+
+module.exports = {
+	get(object, path, value) {
+		if (!isObj(object) || typeof path !== 'string') {
+			return value === undefined ? object : value;
+		}
+
+		const pathArray = getPathSegments(path);
+		if (pathArray.length === 0) {
+			return;
+		}
+
+		for (let i = 0; i < pathArray.length; i++) {
+			object = object[pathArray[i]];
+
+			if (object === undefined || object === null) {
+				// `object` is either `undefined` or `null` so we want to stop the loop, and
+				// if this is not the last bit of the path, and
+				// if it did't return `undefined`
+				// it would return `null` if `object` is `null`
+				// but we want `get({foo: null}, 'foo.bar')` to equal `undefined`, or the supplied value, not `null`
+				if (i !== pathArray.length - 1) {
+					return value;
+				}
+
+				break;
+			}
+		}
+
+		return object === undefined ? value : object;
+	},
+
+	set(object, path, value) {
+		if (!isObj(object) || typeof path !== 'string') {
+			return object;
+		}
+
+		const root = object;
+		const pathArray = getPathSegments(path);
+
+		for (let i = 0; i < pathArray.length; i++) {
+			const p = pathArray[i];
+
+			if (!isObj(object[p])) {
+				object[p] = {};
+			}
+
+			if (i === pathArray.length - 1) {
+				object[p] = value;
+			}
+
+			object = object[p];
+		}
+
+		return root;
+	},
+
+	delete(object, path) {
+		if (!isObj(object) || typeof path !== 'string') {
+			return false;
+		}
+
+		const pathArray = getPathSegments(path);
+
+		for (let i = 0; i < pathArray.length; i++) {
+			const p = pathArray[i];
+
+			if (i === pathArray.length - 1) {
+				delete object[p];
+				return true;
+			}
+
+			object = object[p];
+
+			if (!isObj(object)) {
+				return false;
+			}
+		}
+	},
+
+	has(object, path) {
+		if (!isObj(object) || typeof path !== 'string') {
+			return false;
+		}
+
+		const pathArray = getPathSegments(path);
+		if (pathArray.length === 0) {
+			return false;
+		}
+
+		// eslint-disable-next-line unicorn/no-for-loop
+		for (let i = 0; i < pathArray.length; i++) {
+			if (isObj(object)) {
+				if (!(pathArray[i] in object)) {
+					return false;
+				}
+
+				object = object[pathArray[i]];
+			} else {
+				return false;
+			}
+		}
+
+		return true;
+	}
+};
+
+},{"is-obj":172}],122:[function(require,module,exports){
 'use strict';
 
 var elliptic = exports;
@@ -46918,7 +43386,7 @@ elliptic.curves = require('./elliptic/curves');
 elliptic.ec = require('./elliptic/ec');
 elliptic.eddsa = require('./elliptic/eddsa');
 
-},{"../package.json":172,"./elliptic/curve":159,"./elliptic/curves":162,"./elliptic/ec":163,"./elliptic/eddsa":166,"./elliptic/utils":170,"brorand":90}],157:[function(require,module,exports){
+},{"../package.json":138,"./elliptic/curve":125,"./elliptic/curves":128,"./elliptic/ec":129,"./elliptic/eddsa":132,"./elliptic/utils":136,"brorand":55}],123:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -47301,7 +43769,7 @@ BasePoint.prototype.dblp = function dblp(k) {
   return r;
 };
 
-},{"../utils":170,"bn.js":171}],158:[function(require,module,exports){
+},{"../utils":136,"bn.js":137}],124:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -47738,7 +44206,7 @@ Point.prototype.eqXToP = function eqXToP(x) {
 Point.prototype.toP = Point.prototype.normalize;
 Point.prototype.mixedAdd = Point.prototype.add;
 
-},{"../utils":170,"./base":157,"bn.js":171,"inherits":205}],159:[function(require,module,exports){
+},{"../utils":136,"./base":123,"bn.js":137,"inherits":171}],125:[function(require,module,exports){
 'use strict';
 
 var curve = exports;
@@ -47748,7 +44216,7 @@ curve.short = require('./short');
 curve.mont = require('./mont');
 curve.edwards = require('./edwards');
 
-},{"./base":157,"./edwards":158,"./mont":160,"./short":161}],160:[function(require,module,exports){
+},{"./base":123,"./edwards":124,"./mont":126,"./short":127}],126:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -47928,7 +44396,7 @@ Point.prototype.getX = function getX() {
   return this.x.fromRed();
 };
 
-},{"../utils":170,"./base":157,"bn.js":171,"inherits":205}],161:[function(require,module,exports){
+},{"../utils":136,"./base":123,"bn.js":137,"inherits":171}],127:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -48868,7 +45336,7 @@ JPoint.prototype.isInfinity = function isInfinity() {
   return this.z.cmpn(0) === 0;
 };
 
-},{"../utils":170,"./base":157,"bn.js":171,"inherits":205}],162:[function(require,module,exports){
+},{"../utils":136,"./base":123,"bn.js":137,"inherits":171}],128:[function(require,module,exports){
 'use strict';
 
 var curves = exports;
@@ -49076,7 +45544,7 @@ defineCurve('secp256k1', {
   ],
 });
 
-},{"./curve":159,"./precomputed/secp256k1":169,"./utils":170,"hash.js":191}],163:[function(require,module,exports){
+},{"./curve":125,"./precomputed/secp256k1":135,"./utils":136,"hash.js":157}],129:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -49321,7 +45789,7 @@ EC.prototype.getKeyRecoveryParam = function(e, signature, Q, enc) {
   throw new Error('Unable to find valid recovery factor');
 };
 
-},{"../curves":162,"../utils":170,"./key":164,"./signature":165,"bn.js":171,"brorand":90,"hmac-drbg":203}],164:[function(require,module,exports){
+},{"../curves":128,"../utils":136,"./key":130,"./signature":131,"bn.js":137,"brorand":55,"hmac-drbg":169}],130:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -49444,7 +45912,7 @@ KeyPair.prototype.inspect = function inspect() {
          ' pub: ' + (this.pub && this.pub.inspect()) + ' >';
 };
 
-},{"../utils":170,"bn.js":171}],165:[function(require,module,exports){
+},{"../utils":136,"bn.js":137}],131:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -49612,7 +46080,7 @@ Signature.prototype.toDER = function toDER(enc) {
   return utils.encode(res, enc);
 };
 
-},{"../utils":170,"bn.js":171}],166:[function(require,module,exports){
+},{"../utils":136,"bn.js":137}],132:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -49732,7 +46200,7 @@ EDDSA.prototype.isPoint = function isPoint(val) {
   return val instanceof this.pointClass;
 };
 
-},{"../curves":162,"../utils":170,"./key":167,"./signature":168,"hash.js":191}],167:[function(require,module,exports){
+},{"../curves":128,"../utils":136,"./key":133,"./signature":134,"hash.js":157}],133:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -49829,7 +46297,7 @@ KeyPair.prototype.getPublic = function getPublic(enc) {
 
 module.exports = KeyPair;
 
-},{"../utils":170}],168:[function(require,module,exports){
+},{"../utils":136}],134:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -49896,7 +46364,7 @@ Signature.prototype.toHex = function toHex() {
 
 module.exports = Signature;
 
-},{"../utils":170,"bn.js":171}],169:[function(require,module,exports){
+},{"../utils":136,"bn.js":137}],135:[function(require,module,exports){
 module.exports = {
   doubles: {
     step: 4,
@@ -50678,7 +47146,7 @@ module.exports = {
   },
 };
 
-},{}],170:[function(require,module,exports){
+},{}],136:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -50799,9 +47267,9 @@ function intFromLE(bytes) {
 utils.intFromLE = intFromLE;
 
 
-},{"bn.js":171,"minimalistic-assert":209,"minimalistic-crypto-utils":210}],171:[function(require,module,exports){
-arguments[4][87][0].apply(exports,arguments)
-},{"buffer":91,"dup":87}],172:[function(require,module,exports){
+},{"bn.js":137,"minimalistic-assert":176,"minimalistic-crypto-utils":177}],137:[function(require,module,exports){
+arguments[4][52][0].apply(exports,arguments)
+},{"buffer":56,"dup":52}],138:[function(require,module,exports){
 module.exports={
   "name": "elliptic",
   "version": "6.5.4",
@@ -50859,7 +47327,7 @@ module.exports={
   }
 }
 
-},{}],173:[function(require,module,exports){
+},{}],139:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -51358,7 +47826,7 @@ function eventTargetAgnosticAddListener(emitter, name, listener, flags) {
   }
 }
 
-},{}],174:[function(require,module,exports){
+},{}],140:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var MD5 = require('md5.js')
 
@@ -51405,7 +47873,7 @@ function EVP_BytesToKey (password, salt, keyBits, ivLen) {
 
 module.exports = EVP_BytesToKey
 
-},{"md5.js":206,"safe-buffer":234}],175:[function(require,module,exports){
+},{"md5.js":173,"safe-buffer":208}],141:[function(require,module,exports){
 'use strict'
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('readable-stream').Transform
@@ -51502,37 +47970,37 @@ HashBase.prototype._digest = function () {
 
 module.exports = HashBase
 
-},{"inherits":205,"readable-stream":190,"safe-buffer":234}],176:[function(require,module,exports){
-arguments[4][119][0].apply(exports,arguments)
-},{"dup":119}],177:[function(require,module,exports){
-arguments[4][120][0].apply(exports,arguments)
-},{"./_stream_readable":179,"./_stream_writable":181,"_process":223,"dup":120,"inherits":205}],178:[function(require,module,exports){
-arguments[4][121][0].apply(exports,arguments)
-},{"./_stream_transform":180,"dup":121,"inherits":205}],179:[function(require,module,exports){
-arguments[4][122][0].apply(exports,arguments)
-},{"../errors":176,"./_stream_duplex":177,"./internal/streams/async_iterator":182,"./internal/streams/buffer_list":183,"./internal/streams/destroy":184,"./internal/streams/from":186,"./internal/streams/state":188,"./internal/streams/stream":189,"_process":223,"buffer":136,"dup":122,"events":173,"inherits":205,"string_decoder/":259,"util":91}],180:[function(require,module,exports){
-arguments[4][123][0].apply(exports,arguments)
-},{"../errors":176,"./_stream_duplex":177,"dup":123,"inherits":205}],181:[function(require,module,exports){
-arguments[4][124][0].apply(exports,arguments)
-},{"../errors":176,"./_stream_duplex":177,"./internal/streams/destroy":184,"./internal/streams/state":188,"./internal/streams/stream":189,"_process":223,"buffer":136,"dup":124,"inherits":205,"util-deprecate":262}],182:[function(require,module,exports){
-arguments[4][125][0].apply(exports,arguments)
-},{"./end-of-stream":185,"_process":223,"dup":125}],183:[function(require,module,exports){
-arguments[4][126][0].apply(exports,arguments)
-},{"buffer":136,"dup":126,"util":91}],184:[function(require,module,exports){
-arguments[4][127][0].apply(exports,arguments)
-},{"_process":223,"dup":127}],185:[function(require,module,exports){
-arguments[4][128][0].apply(exports,arguments)
-},{"../../../errors":176,"dup":128}],186:[function(require,module,exports){
-arguments[4][129][0].apply(exports,arguments)
-},{"dup":129}],187:[function(require,module,exports){
-arguments[4][130][0].apply(exports,arguments)
-},{"../../../errors":176,"./end-of-stream":185,"dup":130}],188:[function(require,module,exports){
-arguments[4][131][0].apply(exports,arguments)
-},{"../../../errors":176,"dup":131}],189:[function(require,module,exports){
-arguments[4][132][0].apply(exports,arguments)
-},{"dup":132,"events":173}],190:[function(require,module,exports){
-arguments[4][133][0].apply(exports,arguments)
-},{"./lib/_stream_duplex.js":177,"./lib/_stream_passthrough.js":178,"./lib/_stream_readable.js":179,"./lib/_stream_transform.js":180,"./lib/_stream_writable.js":181,"./lib/internal/streams/end-of-stream.js":185,"./lib/internal/streams/pipeline.js":187,"dup":133}],191:[function(require,module,exports){
+},{"inherits":171,"readable-stream":156,"safe-buffer":208}],142:[function(require,module,exports){
+arguments[4][84][0].apply(exports,arguments)
+},{"dup":84}],143:[function(require,module,exports){
+arguments[4][85][0].apply(exports,arguments)
+},{"./_stream_readable":145,"./_stream_writable":147,"_process":197,"dup":85,"inherits":171}],144:[function(require,module,exports){
+arguments[4][86][0].apply(exports,arguments)
+},{"./_stream_transform":146,"dup":86,"inherits":171}],145:[function(require,module,exports){
+arguments[4][87][0].apply(exports,arguments)
+},{"../errors":142,"./_stream_duplex":143,"./internal/streams/async_iterator":148,"./internal/streams/buffer_list":149,"./internal/streams/destroy":150,"./internal/streams/from":152,"./internal/streams/state":154,"./internal/streams/stream":155,"_process":197,"buffer":101,"dup":87,"events":139,"inherits":171,"string_decoder/":234,"util":56}],146:[function(require,module,exports){
+arguments[4][88][0].apply(exports,arguments)
+},{"../errors":142,"./_stream_duplex":143,"dup":88,"inherits":171}],147:[function(require,module,exports){
+arguments[4][89][0].apply(exports,arguments)
+},{"../errors":142,"./_stream_duplex":143,"./internal/streams/destroy":150,"./internal/streams/state":154,"./internal/streams/stream":155,"_process":197,"buffer":101,"dup":89,"inherits":171,"util-deprecate":236}],148:[function(require,module,exports){
+arguments[4][90][0].apply(exports,arguments)
+},{"./end-of-stream":151,"_process":197,"dup":90}],149:[function(require,module,exports){
+arguments[4][91][0].apply(exports,arguments)
+},{"buffer":101,"dup":91,"util":56}],150:[function(require,module,exports){
+arguments[4][92][0].apply(exports,arguments)
+},{"_process":197,"dup":92}],151:[function(require,module,exports){
+arguments[4][93][0].apply(exports,arguments)
+},{"../../../errors":142,"dup":93}],152:[function(require,module,exports){
+arguments[4][94][0].apply(exports,arguments)
+},{"dup":94}],153:[function(require,module,exports){
+arguments[4][95][0].apply(exports,arguments)
+},{"../../../errors":142,"./end-of-stream":151,"dup":95}],154:[function(require,module,exports){
+arguments[4][96][0].apply(exports,arguments)
+},{"../../../errors":142,"dup":96}],155:[function(require,module,exports){
+arguments[4][97][0].apply(exports,arguments)
+},{"dup":97,"events":139}],156:[function(require,module,exports){
+arguments[4][98][0].apply(exports,arguments)
+},{"./lib/_stream_duplex.js":143,"./lib/_stream_passthrough.js":144,"./lib/_stream_readable.js":145,"./lib/_stream_transform.js":146,"./lib/_stream_writable.js":147,"./lib/internal/streams/end-of-stream.js":151,"./lib/internal/streams/pipeline.js":153,"dup":98}],157:[function(require,module,exports){
 var hash = exports;
 
 hash.utils = require('./hash/utils');
@@ -51549,7 +48017,7 @@ hash.sha384 = hash.sha.sha384;
 hash.sha512 = hash.sha.sha512;
 hash.ripemd160 = hash.ripemd.ripemd160;
 
-},{"./hash/common":192,"./hash/hmac":193,"./hash/ripemd":194,"./hash/sha":195,"./hash/utils":202}],192:[function(require,module,exports){
+},{"./hash/common":158,"./hash/hmac":159,"./hash/ripemd":160,"./hash/sha":161,"./hash/utils":168}],158:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -51643,7 +48111,7 @@ BlockHash.prototype._pad = function pad() {
   return res;
 };
 
-},{"./utils":202,"minimalistic-assert":209}],193:[function(require,module,exports){
+},{"./utils":168,"minimalistic-assert":176}],159:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -51692,7 +48160,7 @@ Hmac.prototype.digest = function digest(enc) {
   return this.outer.digest(enc);
 };
 
-},{"./utils":202,"minimalistic-assert":209}],194:[function(require,module,exports){
+},{"./utils":168,"minimalistic-assert":176}],160:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -51840,7 +48308,7 @@ var sh = [
   8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 ];
 
-},{"./common":192,"./utils":202}],195:[function(require,module,exports){
+},{"./common":158,"./utils":168}],161:[function(require,module,exports){
 'use strict';
 
 exports.sha1 = require('./sha/1');
@@ -51849,7 +48317,7 @@ exports.sha256 = require('./sha/256');
 exports.sha384 = require('./sha/384');
 exports.sha512 = require('./sha/512');
 
-},{"./sha/1":196,"./sha/224":197,"./sha/256":198,"./sha/384":199,"./sha/512":200}],196:[function(require,module,exports){
+},{"./sha/1":162,"./sha/224":163,"./sha/256":164,"./sha/384":165,"./sha/512":166}],162:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -51925,7 +48393,7 @@ SHA1.prototype._digest = function digest(enc) {
     return utils.split32(this.h, 'big');
 };
 
-},{"../common":192,"../utils":202,"./common":201}],197:[function(require,module,exports){
+},{"../common":158,"../utils":168,"./common":167}],163:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -51957,7 +48425,7 @@ SHA224.prototype._digest = function digest(enc) {
 };
 
 
-},{"../utils":202,"./256":198}],198:[function(require,module,exports){
+},{"../utils":168,"./256":164}],164:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -52064,7 +48532,7 @@ SHA256.prototype._digest = function digest(enc) {
     return utils.split32(this.h, 'big');
 };
 
-},{"../common":192,"../utils":202,"./common":201,"minimalistic-assert":209}],199:[function(require,module,exports){
+},{"../common":158,"../utils":168,"./common":167,"minimalistic-assert":176}],165:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -52101,7 +48569,7 @@ SHA384.prototype._digest = function digest(enc) {
     return utils.split32(this.h.slice(0, 12), 'big');
 };
 
-},{"../utils":202,"./512":200}],200:[function(require,module,exports){
+},{"../utils":168,"./512":166}],166:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -52433,7 +48901,7 @@ function g1_512_lo(xh, xl) {
   return r;
 }
 
-},{"../common":192,"../utils":202,"minimalistic-assert":209}],201:[function(require,module,exports){
+},{"../common":158,"../utils":168,"minimalistic-assert":176}],167:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -52484,7 +48952,7 @@ function g1_256(x) {
 }
 exports.g1_256 = g1_256;
 
-},{"../utils":202}],202:[function(require,module,exports){
+},{"../utils":168}],168:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -52764,7 +49232,7 @@ function shr64_lo(ah, al, num) {
 }
 exports.shr64_lo = shr64_lo;
 
-},{"inherits":205,"minimalistic-assert":209}],203:[function(require,module,exports){
+},{"inherits":171,"minimalistic-assert":176}],169:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -52879,7 +49347,7 @@ HmacDRBG.prototype.generate = function generate(len, enc, add, addEnc) {
   return utils.encode(res, enc);
 };
 
-},{"hash.js":191,"minimalistic-assert":209,"minimalistic-crypto-utils":210}],204:[function(require,module,exports){
+},{"hash.js":157,"minimalistic-assert":176,"minimalistic-crypto-utils":177}],170:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -52966,7 +49434,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],205:[function(require,module,exports){
+},{}],171:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -52995,7 +49463,15 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],206:[function(require,module,exports){
+},{}],172:[function(require,module,exports){
+'use strict';
+
+module.exports = value => {
+	const type = typeof value;
+	return value !== null && (type === 'object' || type === 'function');
+};
+
+},{}],173:[function(require,module,exports){
 'use strict'
 var inherits = require('inherits')
 var HashBase = require('hash-base')
@@ -53143,7 +49619,7 @@ function fnI (a, b, c, d, m, k, s) {
 
 module.exports = MD5
 
-},{"hash-base":175,"inherits":205,"safe-buffer":234}],207:[function(require,module,exports){
+},{"hash-base":141,"inherits":171,"safe-buffer":208}],174:[function(require,module,exports){
 var bn = require('bn.js');
 var brorand = require('brorand');
 
@@ -53260,9 +49736,9 @@ MillerRabin.prototype.getDivisor = function getDivisor(n, k) {
   return false;
 };
 
-},{"bn.js":208,"brorand":90}],208:[function(require,module,exports){
-arguments[4][87][0].apply(exports,arguments)
-},{"buffer":91,"dup":87}],209:[function(require,module,exports){
+},{"bn.js":175,"brorand":55}],175:[function(require,module,exports){
+arguments[4][52][0].apply(exports,arguments)
+},{"buffer":56,"dup":52}],176:[function(require,module,exports){
 module.exports = assert;
 
 function assert(val, msg) {
@@ -53275,7 +49751,7 @@ assert.equal = function assertEqual(l, r, msg) {
     throw new Error(msg || ('Assertion failed: ' + l + ' != ' + r));
 };
 
-},{}],210:[function(require,module,exports){
+},{}],177:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -53335,7 +49811,358 @@ utils.encode = function encode(arr, enc) {
     return arr;
 };
 
-},{}],211:[function(require,module,exports){
+},{}],178:[function(require,module,exports){
+'use strict';
+
+const w3 = {
+  svg: 'http://www.w3.org/2000/svg',
+  xlink: 'http://www.w3.org/1999/xlink',
+  xmlns: 'http://www.w3.org/XML/1998/namespace'
+};
+
+module.exports = (w, h) => ['svg', {
+  xmlns: w3.svg, 'xmlns:xlink': w3.xlink,
+  width: w, height: h,
+  viewBox: '0 0 ' + w + ' ' + h
+}];
+
+},{}],179:[function(require,module,exports){
+'use strict';
+
+const parse = require('./parse.js');
+const stringify = require('./stringify.js');
+const traverse = require('./traverse.js');
+const renderer = require('./renderer.js');
+const tt = require('./tt.js');
+const genSvg = require('./gen-svg.js');
+
+exports.renderer = renderer;
+exports.parse = parse;
+exports.stringify = stringify;
+exports.traverse = traverse;
+exports.tt = tt;
+
+exports.gen = {
+  svg: genSvg
+};
+
+exports.p = parse;
+exports.s = stringify;
+exports.t = traverse;
+
+},{"./gen-svg.js":178,"./parse.js":180,"./renderer.js":181,"./stringify.js":182,"./traverse.js":183,"./tt.js":184}],180:[function(require,module,exports){
+'use strict';
+
+const parser = require('sax').parser;
+
+function parse(data, config) {
+  const res = [];
+  const stack = [];
+  let pointer = res;
+  let trim = true;
+
+  let strict = true;
+  if (config && (config.strict !== undefined)) {
+    strict = config.strict;
+  }
+
+  if (config !== undefined) {
+    if (config.trim !== undefined) {
+      trim = config.trim;
+    }
+  }
+
+  const p = parser(strict);
+
+  p.ontext = function (e) {
+    if ((trim === false) || (e.trim() !== '')) {
+      pointer.push(e);
+    }
+  };
+
+  p.onopentag = function (e) {
+    const leaf = [e.name, e.attributes];
+    stack.push(pointer);
+    pointer.push(leaf);
+    pointer = leaf;
+  };
+
+  p.onclosetag = function () {
+    pointer = stack.pop();
+  };
+
+  p.oncdata = function (e) {
+    if ((trim === false) || (e.trim() !== '')) {
+      pointer.push('<![CDATA[' + e + ']]>');
+    }
+  };
+
+  p.write(data).close();
+  return res[0];
+}
+
+module.exports = parse;
+
+},{"sax":210}],181:[function(require,module,exports){
+'use strict';
+
+const stringify = require('./stringify.js');
+
+const renderer = root => {
+  const content = (typeof root === 'string')
+    ? document.getElementById(root)
+    : root;
+
+  return ml => {
+    let str;
+    try {
+      str = stringify(ml);
+      content.innerHTML = str;
+    } catch (err) {
+      console.log(ml);
+    }
+  };
+};
+
+module.exports = renderer;
+
+/* eslint-env browser */
+
+},{"./stringify.js":182}],182:[function(require,module,exports){
+'use strict';
+
+const isObject = o => o && Object.prototype.toString.call(o) === '[object Object]';
+
+function indenter (indentation) {
+  if (!(indentation > 0)) {
+    return txt => txt;
+  }
+  var space = ' '.repeat(indentation);
+  return txt => {
+
+    if (typeof txt !== 'string') {
+      return txt;
+    }
+
+    const arr = txt.split('\n');
+
+    if (arr.length === 1) {
+      return space + txt;
+    }
+
+    return arr
+      .map(e => (e.trim() === '') ? e : space + e)
+      .join('\n');
+  };
+}
+
+const clean = txt => txt
+  .split('\n')
+  .filter(e => e.trim() !== '')
+  .join('\n');
+
+function stringify (a, indentation) {
+  const cr = (indentation > 0) ? '\n' : '';
+  const indent = indenter(indentation);
+
+  function rec(a) {
+    let body = '';
+    let isFlat = true;
+
+    let res;
+    const isEmpty = a.some((e, i, arr) => {
+      if (i === 0) {
+        res = '<' + e;
+        return (arr.length === 1);
+      }
+
+      if (i === 1) {
+        if (isObject(e)) {
+          Object.keys(e).map(key => {
+            let val = e[key];
+            if (Array.isArray(val)) {
+              val = val.join(' ');
+            }
+            res += ' ' + key + '="' + val + '"';
+          });
+          if (arr.length === 2) {
+            return true;
+          }
+          res += '>';
+          return;
+        }
+        res += '>';
+      }
+
+      switch (typeof e) {
+      case 'string':
+      case 'number':
+      case 'boolean':
+      case 'undefined':
+        body += e + cr;
+        return;
+      }
+
+      isFlat = false;
+      body += rec(e);
+    });
+
+    if (isEmpty) {
+      return res + '/>' + cr; // short form
+    }
+
+    return isFlat
+      ? res + clean(body) + '</' + a[0] + '>' + cr
+      : res + cr + indent(body) + '</' + a[0] + '>' + cr;
+  }
+
+  return rec(a);
+}
+
+module.exports = stringify;
+
+},{}],183:[function(require,module,exports){
+'use strict';
+
+function skipFn() {
+  this._skip = true;
+}
+
+function removeFn() {
+  this._remove = true;
+}
+
+function nameFn(name) {
+  this._name = name;
+}
+
+function replaceFn(node) {
+  this._replace = node;
+}
+
+function traverse(origin, callbacks) {
+  const empty = function() {};
+
+  const enter = callbacks && callbacks.enter || empty;
+  const leave = callbacks && callbacks.leave || empty;
+
+
+  function rec(tree, parent) {
+    if (tree === undefined) return;
+    if (tree === null) return;
+    if (tree === true) return;
+    if (tree === false) return;
+
+    const node = {
+      attr: {},
+      full: tree
+    };
+
+    const cxt = {
+      name: nameFn,
+      skip: skipFn,
+      // break: breakFn,
+      remove: removeFn,
+      replace: replaceFn,
+
+      _name: undefined,
+      _skip: false,
+      // _break: false,
+      _remove: false,
+      _replace: undefined
+    };
+
+    let e1IsNotAnObject = true;
+
+    switch (Object.prototype.toString.call(tree)) {
+    case '[object String]':
+    case '[object Number]':
+      return;
+
+    case '[object Array]':
+      tree.some(function(e, i) {
+        if (i === 0) {
+          node.name = e;
+          return false;
+        }
+        if (i === 1) {
+          if (
+            Object.prototype.toString.call(e) === '[object Object]'
+          ) {
+            e1IsNotAnObject = false;
+            node.attr = e;
+          }
+          return true;
+        }
+      });
+
+      enter.call(cxt, node, parent);
+
+      if (cxt._name) {
+        tree[0] = cxt._name;
+      }
+
+      if (cxt._replace) {
+        return cxt._replace;
+      }
+
+      if (cxt._remove) {
+        return null;
+      }
+
+      if (!cxt._skip) {
+        let index = 0;
+        let ilen = tree.length;
+        while (index < ilen) {
+          if ((index > 1) || ((index === 1) && e1IsNotAnObject)) {
+            const returnRes = rec(tree[index], node);
+            if (returnRes === null) {
+              tree.splice(index, 1);
+              ilen -= 1;
+              continue;
+            }
+            if (returnRes) {
+              tree[index] = returnRes;
+            }
+          }
+          index += 1;
+        }
+
+        leave.call(cxt, node, parent);
+        if (cxt._name) {
+          tree[0] = cxt._name;
+        }
+        if (cxt._replace) {
+          return cxt._replace;
+        }
+        if (cxt._remove) {
+          return null;
+        }
+      }
+    }
+  }
+
+  rec(origin, undefined);
+}
+
+module.exports = traverse;
+
+/* eslint complexity: 0 */
+
+},{}],184:[function(require,module,exports){
+'use strict';
+
+module.exports = (x, y, obj) => {
+  let objt = {};
+  if (x || y) {
+    const tt = [x || 0].concat(y ? [y] : []);
+    objt = {transform: 'translate(' + tt.join(',') + ')'};
+  }
+  obj = (typeof obj === 'object') ? obj : {};
+  return Object.assign(objt, obj);
+};
+
+},{}],185:[function(require,module,exports){
 module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.2": "aes-128-cbc",
 "2.16.840.1.101.3.4.1.3": "aes-128-ofb",
@@ -53349,7 +50176,7 @@ module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.43": "aes-256-ofb",
 "2.16.840.1.101.3.4.1.44": "aes-256-cfb"
 }
-},{}],212:[function(require,module,exports){
+},{}],186:[function(require,module,exports){
 // from https://github.com/indutny/self-signed/blob/gh-pages/lib/asn1.js
 // Fedor, you are amazing.
 'use strict'
@@ -53473,7 +50300,7 @@ exports.signature = asn1.define('signature', function () {
   )
 })
 
-},{"./certificate":213,"asn1.js":73}],213:[function(require,module,exports){
+},{"./certificate":187,"asn1.js":38}],187:[function(require,module,exports){
 // from https://github.com/Rantanen/node-dtls/blob/25a7dc861bda38cfeac93a723500eea4f0ac2e86/Certificate.js
 // thanks to @Rantanen
 
@@ -53564,7 +50391,7 @@ var X509Certificate = asn.define('X509Certificate', function () {
 
 module.exports = X509Certificate
 
-},{"asn1.js":73}],214:[function(require,module,exports){
+},{"asn1.js":38}],188:[function(require,module,exports){
 // adapted from https://github.com/apatil/pemstrip
 var findProc = /Proc-Type: 4,ENCRYPTED[\n\r]+DEK-Info: AES-((?:128)|(?:192)|(?:256))-CBC,([0-9A-H]+)[\n\r]+([0-9A-z\n\r+/=]+)[\n\r]+/m
 var startRegex = /^-----BEGIN ((?:.*? KEY)|CERTIFICATE)-----/m
@@ -53597,7 +50424,7 @@ module.exports = function (okey, password) {
   }
 }
 
-},{"browserify-aes":94,"evp_bytestokey":174,"safe-buffer":234}],215:[function(require,module,exports){
+},{"browserify-aes":59,"evp_bytestokey":140,"safe-buffer":208}],189:[function(require,module,exports){
 var asn1 = require('./asn1')
 var aesid = require('./aesid.json')
 var fixProc = require('./fixProc')
@@ -53706,7 +50533,7 @@ function decrypt (data, password) {
   return Buffer.concat(out)
 }
 
-},{"./aesid.json":211,"./asn1":212,"./fixProc":214,"browserify-aes":94,"pbkdf2":217,"safe-buffer":234}],216:[function(require,module,exports){
+},{"./aesid.json":185,"./asn1":186,"./fixProc":188,"browserify-aes":59,"pbkdf2":191,"safe-buffer":208}],190:[function(require,module,exports){
 (function (process){(function (){
 // 'path' module extracted from Node.js v8.11.1 (only the posix part)
 // transplited with Babel
@@ -54239,11 +51066,11 @@ posix.posix = posix;
 module.exports = posix;
 
 }).call(this)}).call(this,require('_process'))
-},{"_process":223}],217:[function(require,module,exports){
+},{"_process":197}],191:[function(require,module,exports){
 exports.pbkdf2 = require('./lib/async')
 exports.pbkdf2Sync = require('./lib/sync')
 
-},{"./lib/async":218,"./lib/sync":221}],218:[function(require,module,exports){
+},{"./lib/async":192,"./lib/sync":195}],192:[function(require,module,exports){
 (function (global){(function (){
 var Buffer = require('safe-buffer').Buffer
 
@@ -54365,7 +51192,7 @@ module.exports = function (password, salt, iterations, keylen, digest, callback)
 }
 
 }).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./default-encoding":219,"./precondition":220,"./sync":221,"./to-buffer":222,"safe-buffer":234}],219:[function(require,module,exports){
+},{"./default-encoding":193,"./precondition":194,"./sync":195,"./to-buffer":196,"safe-buffer":208}],193:[function(require,module,exports){
 (function (process,global){(function (){
 var defaultEncoding
 /* istanbul ignore next */
@@ -54381,7 +51208,7 @@ if (global.process && global.process.browser) {
 module.exports = defaultEncoding
 
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":223}],220:[function(require,module,exports){
+},{"_process":197}],194:[function(require,module,exports){
 var MAX_ALLOC = Math.pow(2, 30) - 1 // default in iojs
 
 module.exports = function (iterations, keylen) {
@@ -54402,7 +51229,7 @@ module.exports = function (iterations, keylen) {
   }
 }
 
-},{}],221:[function(require,module,exports){
+},{}],195:[function(require,module,exports){
 var md5 = require('create-hash/md5')
 var RIPEMD160 = require('ripemd160')
 var sha = require('sha.js')
@@ -54509,7 +51336,7 @@ function pbkdf2 (password, salt, iterations, keylen, digest) {
 
 module.exports = pbkdf2
 
-},{"./default-encoding":219,"./precondition":220,"./to-buffer":222,"create-hash/md5":141,"ripemd160":233,"safe-buffer":234,"sha.js":237}],222:[function(require,module,exports){
+},{"./default-encoding":193,"./precondition":194,"./to-buffer":196,"create-hash/md5":106,"ripemd160":207,"safe-buffer":208,"sha.js":212}],196:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 module.exports = function (thing, encoding, name) {
@@ -54524,7 +51351,7 @@ module.exports = function (thing, encoding, name) {
   }
 }
 
-},{"safe-buffer":234}],223:[function(require,module,exports){
+},{"safe-buffer":208}],197:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -54710,7 +51537,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],224:[function(require,module,exports){
+},{}],198:[function(require,module,exports){
 exports.publicEncrypt = require('./publicEncrypt')
 exports.privateDecrypt = require('./privateDecrypt')
 
@@ -54722,7 +51549,7 @@ exports.publicDecrypt = function publicDecrypt (key, buf) {
   return exports.privateDecrypt(key, buf, true)
 }
 
-},{"./privateDecrypt":227,"./publicEncrypt":228}],225:[function(require,module,exports){
+},{"./privateDecrypt":201,"./publicEncrypt":202}],199:[function(require,module,exports){
 var createHash = require('create-hash')
 var Buffer = require('safe-buffer').Buffer
 
@@ -54743,9 +51570,9 @@ function i2ops (c) {
   return out
 }
 
-},{"create-hash":140,"safe-buffer":234}],226:[function(require,module,exports){
-arguments[4][87][0].apply(exports,arguments)
-},{"buffer":91,"dup":87}],227:[function(require,module,exports){
+},{"create-hash":105,"safe-buffer":208}],200:[function(require,module,exports){
+arguments[4][52][0].apply(exports,arguments)
+},{"buffer":56,"dup":52}],201:[function(require,module,exports){
 var parseKeys = require('parse-asn1')
 var mgf = require('./mgf')
 var xor = require('./xor')
@@ -54852,7 +51679,7 @@ function compare (a, b) {
   return dif
 }
 
-},{"./mgf":225,"./withPublic":229,"./xor":230,"bn.js":226,"browserify-rsa":112,"create-hash":140,"parse-asn1":215,"safe-buffer":234}],228:[function(require,module,exports){
+},{"./mgf":199,"./withPublic":203,"./xor":204,"bn.js":200,"browserify-rsa":77,"create-hash":105,"parse-asn1":189,"safe-buffer":208}],202:[function(require,module,exports){
 var parseKeys = require('parse-asn1')
 var randomBytes = require('randombytes')
 var createHash = require('create-hash')
@@ -54942,7 +51769,7 @@ function nonZero (len) {
   return out
 }
 
-},{"./mgf":225,"./withPublic":229,"./xor":230,"bn.js":226,"browserify-rsa":112,"create-hash":140,"parse-asn1":215,"randombytes":231,"safe-buffer":234}],229:[function(require,module,exports){
+},{"./mgf":199,"./withPublic":203,"./xor":204,"bn.js":200,"browserify-rsa":77,"create-hash":105,"parse-asn1":189,"randombytes":205,"safe-buffer":208}],203:[function(require,module,exports){
 var BN = require('bn.js')
 var Buffer = require('safe-buffer').Buffer
 
@@ -54956,7 +51783,7 @@ function withPublic (paddedMsg, key) {
 
 module.exports = withPublic
 
-},{"bn.js":226,"safe-buffer":234}],230:[function(require,module,exports){
+},{"bn.js":200,"safe-buffer":208}],204:[function(require,module,exports){
 module.exports = function xor (a, b) {
   var len = a.length
   var i = -1
@@ -54966,7 +51793,7 @@ module.exports = function xor (a, b) {
   return a
 }
 
-},{}],231:[function(require,module,exports){
+},{}],205:[function(require,module,exports){
 (function (process,global){(function (){
 'use strict'
 
@@ -55020,7 +51847,7 @@ function randomBytes (size, cb) {
 }
 
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":223,"safe-buffer":234}],232:[function(require,module,exports){
+},{"_process":197,"safe-buffer":208}],206:[function(require,module,exports){
 (function (process,global){(function (){
 'use strict'
 
@@ -55132,7 +51959,7 @@ function randomFillSync (buf, offset, size) {
 }
 
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":223,"randombytes":231,"safe-buffer":234}],233:[function(require,module,exports){
+},{"_process":197,"randombytes":205,"safe-buffer":208}],207:[function(require,module,exports){
 'use strict'
 var Buffer = require('buffer').Buffer
 var inherits = require('inherits')
@@ -55297,7 +52124,7 @@ function fn5 (a, b, c, d, e, m, k, s) {
 
 module.exports = RIPEMD160
 
-},{"buffer":136,"hash-base":175,"inherits":205}],234:[function(require,module,exports){
+},{"buffer":101,"hash-base":141,"inherits":171}],208:[function(require,module,exports){
 /*! safe-buffer. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
 /* eslint-disable node/no-deprecated-api */
 var buffer = require('buffer')
@@ -55364,7 +52191,7 @@ SafeBuffer.allocUnsafeSlow = function (size) {
   return buffer.SlowBuffer(size)
 }
 
-},{"buffer":136}],235:[function(require,module,exports){
+},{"buffer":101}],209:[function(require,module,exports){
 (function (process){(function (){
 /* eslint-disable node/no-deprecated-api */
 
@@ -55445,7 +52272,1585 @@ if (!safer.constants) {
 module.exports = safer
 
 }).call(this)}).call(this,require('_process'))
-},{"_process":223,"buffer":136}],236:[function(require,module,exports){
+},{"_process":197,"buffer":101}],210:[function(require,module,exports){
+(function (Buffer){(function (){
+;(function (sax) { // wrapper for non-node envs
+  sax.parser = function (strict, opt) { return new SAXParser(strict, opt) }
+  sax.SAXParser = SAXParser
+  sax.SAXStream = SAXStream
+  sax.createStream = createStream
+
+  // When we pass the MAX_BUFFER_LENGTH position, start checking for buffer overruns.
+  // When we check, schedule the next check for MAX_BUFFER_LENGTH - (max(buffer lengths)),
+  // since that's the earliest that a buffer overrun could occur.  This way, checks are
+  // as rare as required, but as often as necessary to ensure never crossing this bound.
+  // Furthermore, buffers are only tested at most once per write(), so passing a very
+  // large string into write() might have undesirable effects, but this is manageable by
+  // the caller, so it is assumed to be safe.  Thus, a call to write() may, in the extreme
+  // edge case, result in creating at most one complete copy of the string passed in.
+  // Set to Infinity to have unlimited buffers.
+  sax.MAX_BUFFER_LENGTH = 64 * 1024
+
+  var buffers = [
+    'comment', 'sgmlDecl', 'textNode', 'tagName', 'doctype',
+    'procInstName', 'procInstBody', 'entity', 'attribName',
+    'attribValue', 'cdata', 'script'
+  ]
+
+  sax.EVENTS = [
+    'text',
+    'processinginstruction',
+    'sgmldeclaration',
+    'doctype',
+    'comment',
+    'opentagstart',
+    'attribute',
+    'opentag',
+    'closetag',
+    'opencdata',
+    'cdata',
+    'closecdata',
+    'error',
+    'end',
+    'ready',
+    'script',
+    'opennamespace',
+    'closenamespace'
+  ]
+
+  function SAXParser (strict, opt) {
+    if (!(this instanceof SAXParser)) {
+      return new SAXParser(strict, opt)
+    }
+
+    var parser = this
+    clearBuffers(parser)
+    parser.q = parser.c = ''
+    parser.bufferCheckPosition = sax.MAX_BUFFER_LENGTH
+    parser.opt = opt || {}
+    parser.opt.lowercase = parser.opt.lowercase || parser.opt.lowercasetags
+    parser.looseCase = parser.opt.lowercase ? 'toLowerCase' : 'toUpperCase'
+    parser.tags = []
+    parser.closed = parser.closedRoot = parser.sawRoot = false
+    parser.tag = parser.error = null
+    parser.strict = !!strict
+    parser.noscript = !!(strict || parser.opt.noscript)
+    parser.state = S.BEGIN
+    parser.strictEntities = parser.opt.strictEntities
+    parser.ENTITIES = parser.strictEntities ? Object.create(sax.XML_ENTITIES) : Object.create(sax.ENTITIES)
+    parser.attribList = []
+
+    // namespaces form a prototype chain.
+    // it always points at the current tag,
+    // which protos to its parent tag.
+    if (parser.opt.xmlns) {
+      parser.ns = Object.create(rootNS)
+    }
+
+    // mostly just for error reporting
+    parser.trackPosition = parser.opt.position !== false
+    if (parser.trackPosition) {
+      parser.position = parser.line = parser.column = 0
+    }
+    emit(parser, 'onready')
+  }
+
+  if (!Object.create) {
+    Object.create = function (o) {
+      function F () {}
+      F.prototype = o
+      var newf = new F()
+      return newf
+    }
+  }
+
+  if (!Object.keys) {
+    Object.keys = function (o) {
+      var a = []
+      for (var i in o) if (o.hasOwnProperty(i)) a.push(i)
+      return a
+    }
+  }
+
+  function checkBufferLength (parser) {
+    var maxAllowed = Math.max(sax.MAX_BUFFER_LENGTH, 10)
+    var maxActual = 0
+    for (var i = 0, l = buffers.length; i < l; i++) {
+      var len = parser[buffers[i]].length
+      if (len > maxAllowed) {
+        // Text/cdata nodes can get big, and since they're buffered,
+        // we can get here under normal conditions.
+        // Avoid issues by emitting the text node now,
+        // so at least it won't get any bigger.
+        switch (buffers[i]) {
+          case 'textNode':
+            closeText(parser)
+            break
+
+          case 'cdata':
+            emitNode(parser, 'oncdata', parser.cdata)
+            parser.cdata = ''
+            break
+
+          case 'script':
+            emitNode(parser, 'onscript', parser.script)
+            parser.script = ''
+            break
+
+          default:
+            error(parser, 'Max buffer length exceeded: ' + buffers[i])
+        }
+      }
+      maxActual = Math.max(maxActual, len)
+    }
+    // schedule the next check for the earliest possible buffer overrun.
+    var m = sax.MAX_BUFFER_LENGTH - maxActual
+    parser.bufferCheckPosition = m + parser.position
+  }
+
+  function clearBuffers (parser) {
+    for (var i = 0, l = buffers.length; i < l; i++) {
+      parser[buffers[i]] = ''
+    }
+  }
+
+  function flushBuffers (parser) {
+    closeText(parser)
+    if (parser.cdata !== '') {
+      emitNode(parser, 'oncdata', parser.cdata)
+      parser.cdata = ''
+    }
+    if (parser.script !== '') {
+      emitNode(parser, 'onscript', parser.script)
+      parser.script = ''
+    }
+  }
+
+  SAXParser.prototype = {
+    end: function () { end(this) },
+    write: write,
+    resume: function () { this.error = null; return this },
+    close: function () { return this.write(null) },
+    flush: function () { flushBuffers(this) }
+  }
+
+  var Stream
+  try {
+    Stream = require('stream').Stream
+  } catch (ex) {
+    Stream = function () {}
+  }
+  if (!Stream) Stream = function () {}
+
+  var streamWraps = sax.EVENTS.filter(function (ev) {
+    return ev !== 'error' && ev !== 'end'
+  })
+
+  function createStream (strict, opt) {
+    return new SAXStream(strict, opt)
+  }
+
+  function SAXStream (strict, opt) {
+    if (!(this instanceof SAXStream)) {
+      return new SAXStream(strict, opt)
+    }
+
+    Stream.apply(this)
+
+    this._parser = new SAXParser(strict, opt)
+    this.writable = true
+    this.readable = true
+
+    var me = this
+
+    this._parser.onend = function () {
+      me.emit('end')
+    }
+
+    this._parser.onerror = function (er) {
+      me.emit('error', er)
+
+      // if didn't throw, then means error was handled.
+      // go ahead and clear error, so we can write again.
+      me._parser.error = null
+    }
+
+    this._decoder = null
+
+    streamWraps.forEach(function (ev) {
+      Object.defineProperty(me, 'on' + ev, {
+        get: function () {
+          return me._parser['on' + ev]
+        },
+        set: function (h) {
+          if (!h) {
+            me.removeAllListeners(ev)
+            me._parser['on' + ev] = h
+            return h
+          }
+          me.on(ev, h)
+        },
+        enumerable: true,
+        configurable: false
+      })
+    })
+  }
+
+  SAXStream.prototype = Object.create(Stream.prototype, {
+    constructor: {
+      value: SAXStream
+    }
+  })
+
+  SAXStream.prototype.write = function (data) {
+    if (typeof Buffer === 'function' &&
+      typeof Buffer.isBuffer === 'function' &&
+      Buffer.isBuffer(data)) {
+      if (!this._decoder) {
+        var SD = require('string_decoder').StringDecoder
+        this._decoder = new SD('utf8')
+      }
+      data = this._decoder.write(data)
+    }
+
+    this._parser.write(data.toString())
+    this.emit('data', data)
+    return true
+  }
+
+  SAXStream.prototype.end = function (chunk) {
+    if (chunk && chunk.length) {
+      this.write(chunk)
+    }
+    this._parser.end()
+    return true
+  }
+
+  SAXStream.prototype.on = function (ev, handler) {
+    var me = this
+    if (!me._parser['on' + ev] && streamWraps.indexOf(ev) !== -1) {
+      me._parser['on' + ev] = function () {
+        var args = arguments.length === 1 ? [arguments[0]] : Array.apply(null, arguments)
+        args.splice(0, 0, ev)
+        me.emit.apply(me, args)
+      }
+    }
+
+    return Stream.prototype.on.call(me, ev, handler)
+  }
+
+  // this really needs to be replaced with character classes.
+  // XML allows all manner of ridiculous numbers and digits.
+  var CDATA = '[CDATA['
+  var DOCTYPE = 'DOCTYPE'
+  var XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
+  var XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/'
+  var rootNS = { xml: XML_NAMESPACE, xmlns: XMLNS_NAMESPACE }
+
+  // http://www.w3.org/TR/REC-xml/#NT-NameStartChar
+  // This implementation works on strings, a single character at a time
+  // as such, it cannot ever support astral-plane characters (10000-EFFFF)
+  // without a significant breaking change to either this  parser, or the
+  // JavaScript language.  Implementation of an emoji-capable xml parser
+  // is left as an exercise for the reader.
+  var nameStart = /[:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/
+
+  var nameBody = /[:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u00B7\u0300-\u036F\u203F-\u2040.\d-]/
+
+  var entityStart = /[#:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/
+  var entityBody = /[#:_A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u00B7\u0300-\u036F\u203F-\u2040.\d-]/
+
+  function isWhitespace (c) {
+    return c === ' ' || c === '\n' || c === '\r' || c === '\t'
+  }
+
+  function isQuote (c) {
+    return c === '"' || c === '\''
+  }
+
+  function isAttribEnd (c) {
+    return c === '>' || isWhitespace(c)
+  }
+
+  function isMatch (regex, c) {
+    return regex.test(c)
+  }
+
+  function notMatch (regex, c) {
+    return !isMatch(regex, c)
+  }
+
+  var S = 0
+  sax.STATE = {
+    BEGIN: S++, // leading byte order mark or whitespace
+    BEGIN_WHITESPACE: S++, // leading whitespace
+    TEXT: S++, // general stuff
+    TEXT_ENTITY: S++, // &amp and such.
+    OPEN_WAKA: S++, // <
+    SGML_DECL: S++, // <!BLARG
+    SGML_DECL_QUOTED: S++, // <!BLARG foo "bar
+    DOCTYPE: S++, // <!DOCTYPE
+    DOCTYPE_QUOTED: S++, // <!DOCTYPE "//blah
+    DOCTYPE_DTD: S++, // <!DOCTYPE "//blah" [ ...
+    DOCTYPE_DTD_QUOTED: S++, // <!DOCTYPE "//blah" [ "foo
+    COMMENT_STARTING: S++, // <!-
+    COMMENT: S++, // <!--
+    COMMENT_ENDING: S++, // <!-- blah -
+    COMMENT_ENDED: S++, // <!-- blah --
+    CDATA: S++, // <![CDATA[ something
+    CDATA_ENDING: S++, // ]
+    CDATA_ENDING_2: S++, // ]]
+    PROC_INST: S++, // <?hi
+    PROC_INST_BODY: S++, // <?hi there
+    PROC_INST_ENDING: S++, // <?hi "there" ?
+    OPEN_TAG: S++, // <strong
+    OPEN_TAG_SLASH: S++, // <strong /
+    ATTRIB: S++, // <a
+    ATTRIB_NAME: S++, // <a foo
+    ATTRIB_NAME_SAW_WHITE: S++, // <a foo _
+    ATTRIB_VALUE: S++, // <a foo=
+    ATTRIB_VALUE_QUOTED: S++, // <a foo="bar
+    ATTRIB_VALUE_CLOSED: S++, // <a foo="bar"
+    ATTRIB_VALUE_UNQUOTED: S++, // <a foo=bar
+    ATTRIB_VALUE_ENTITY_Q: S++, // <foo bar="&quot;"
+    ATTRIB_VALUE_ENTITY_U: S++, // <foo bar=&quot
+    CLOSE_TAG: S++, // </a
+    CLOSE_TAG_SAW_WHITE: S++, // </a   >
+    SCRIPT: S++, // <script> ...
+    SCRIPT_ENDING: S++ // <script> ... <
+  }
+
+  sax.XML_ENTITIES = {
+    'amp': '&',
+    'gt': '>',
+    'lt': '<',
+    'quot': '"',
+    'apos': "'"
+  }
+
+  sax.ENTITIES = {
+    'amp': '&',
+    'gt': '>',
+    'lt': '<',
+    'quot': '"',
+    'apos': "'",
+    'AElig': 198,
+    'Aacute': 193,
+    'Acirc': 194,
+    'Agrave': 192,
+    'Aring': 197,
+    'Atilde': 195,
+    'Auml': 196,
+    'Ccedil': 199,
+    'ETH': 208,
+    'Eacute': 201,
+    'Ecirc': 202,
+    'Egrave': 200,
+    'Euml': 203,
+    'Iacute': 205,
+    'Icirc': 206,
+    'Igrave': 204,
+    'Iuml': 207,
+    'Ntilde': 209,
+    'Oacute': 211,
+    'Ocirc': 212,
+    'Ograve': 210,
+    'Oslash': 216,
+    'Otilde': 213,
+    'Ouml': 214,
+    'THORN': 222,
+    'Uacute': 218,
+    'Ucirc': 219,
+    'Ugrave': 217,
+    'Uuml': 220,
+    'Yacute': 221,
+    'aacute': 225,
+    'acirc': 226,
+    'aelig': 230,
+    'agrave': 224,
+    'aring': 229,
+    'atilde': 227,
+    'auml': 228,
+    'ccedil': 231,
+    'eacute': 233,
+    'ecirc': 234,
+    'egrave': 232,
+    'eth': 240,
+    'euml': 235,
+    'iacute': 237,
+    'icirc': 238,
+    'igrave': 236,
+    'iuml': 239,
+    'ntilde': 241,
+    'oacute': 243,
+    'ocirc': 244,
+    'ograve': 242,
+    'oslash': 248,
+    'otilde': 245,
+    'ouml': 246,
+    'szlig': 223,
+    'thorn': 254,
+    'uacute': 250,
+    'ucirc': 251,
+    'ugrave': 249,
+    'uuml': 252,
+    'yacute': 253,
+    'yuml': 255,
+    'copy': 169,
+    'reg': 174,
+    'nbsp': 160,
+    'iexcl': 161,
+    'cent': 162,
+    'pound': 163,
+    'curren': 164,
+    'yen': 165,
+    'brvbar': 166,
+    'sect': 167,
+    'uml': 168,
+    'ordf': 170,
+    'laquo': 171,
+    'not': 172,
+    'shy': 173,
+    'macr': 175,
+    'deg': 176,
+    'plusmn': 177,
+    'sup1': 185,
+    'sup2': 178,
+    'sup3': 179,
+    'acute': 180,
+    'micro': 181,
+    'para': 182,
+    'middot': 183,
+    'cedil': 184,
+    'ordm': 186,
+    'raquo': 187,
+    'frac14': 188,
+    'frac12': 189,
+    'frac34': 190,
+    'iquest': 191,
+    'times': 215,
+    'divide': 247,
+    'OElig': 338,
+    'oelig': 339,
+    'Scaron': 352,
+    'scaron': 353,
+    'Yuml': 376,
+    'fnof': 402,
+    'circ': 710,
+    'tilde': 732,
+    'Alpha': 913,
+    'Beta': 914,
+    'Gamma': 915,
+    'Delta': 916,
+    'Epsilon': 917,
+    'Zeta': 918,
+    'Eta': 919,
+    'Theta': 920,
+    'Iota': 921,
+    'Kappa': 922,
+    'Lambda': 923,
+    'Mu': 924,
+    'Nu': 925,
+    'Xi': 926,
+    'Omicron': 927,
+    'Pi': 928,
+    'Rho': 929,
+    'Sigma': 931,
+    'Tau': 932,
+    'Upsilon': 933,
+    'Phi': 934,
+    'Chi': 935,
+    'Psi': 936,
+    'Omega': 937,
+    'alpha': 945,
+    'beta': 946,
+    'gamma': 947,
+    'delta': 948,
+    'epsilon': 949,
+    'zeta': 950,
+    'eta': 951,
+    'theta': 952,
+    'iota': 953,
+    'kappa': 954,
+    'lambda': 955,
+    'mu': 956,
+    'nu': 957,
+    'xi': 958,
+    'omicron': 959,
+    'pi': 960,
+    'rho': 961,
+    'sigmaf': 962,
+    'sigma': 963,
+    'tau': 964,
+    'upsilon': 965,
+    'phi': 966,
+    'chi': 967,
+    'psi': 968,
+    'omega': 969,
+    'thetasym': 977,
+    'upsih': 978,
+    'piv': 982,
+    'ensp': 8194,
+    'emsp': 8195,
+    'thinsp': 8201,
+    'zwnj': 8204,
+    'zwj': 8205,
+    'lrm': 8206,
+    'rlm': 8207,
+    'ndash': 8211,
+    'mdash': 8212,
+    'lsquo': 8216,
+    'rsquo': 8217,
+    'sbquo': 8218,
+    'ldquo': 8220,
+    'rdquo': 8221,
+    'bdquo': 8222,
+    'dagger': 8224,
+    'Dagger': 8225,
+    'bull': 8226,
+    'hellip': 8230,
+    'permil': 8240,
+    'prime': 8242,
+    'Prime': 8243,
+    'lsaquo': 8249,
+    'rsaquo': 8250,
+    'oline': 8254,
+    'frasl': 8260,
+    'euro': 8364,
+    'image': 8465,
+    'weierp': 8472,
+    'real': 8476,
+    'trade': 8482,
+    'alefsym': 8501,
+    'larr': 8592,
+    'uarr': 8593,
+    'rarr': 8594,
+    'darr': 8595,
+    'harr': 8596,
+    'crarr': 8629,
+    'lArr': 8656,
+    'uArr': 8657,
+    'rArr': 8658,
+    'dArr': 8659,
+    'hArr': 8660,
+    'forall': 8704,
+    'part': 8706,
+    'exist': 8707,
+    'empty': 8709,
+    'nabla': 8711,
+    'isin': 8712,
+    'notin': 8713,
+    'ni': 8715,
+    'prod': 8719,
+    'sum': 8721,
+    'minus': 8722,
+    'lowast': 8727,
+    'radic': 8730,
+    'prop': 8733,
+    'infin': 8734,
+    'ang': 8736,
+    'and': 8743,
+    'or': 8744,
+    'cap': 8745,
+    'cup': 8746,
+    'int': 8747,
+    'there4': 8756,
+    'sim': 8764,
+    'cong': 8773,
+    'asymp': 8776,
+    'ne': 8800,
+    'equiv': 8801,
+    'le': 8804,
+    'ge': 8805,
+    'sub': 8834,
+    'sup': 8835,
+    'nsub': 8836,
+    'sube': 8838,
+    'supe': 8839,
+    'oplus': 8853,
+    'otimes': 8855,
+    'perp': 8869,
+    'sdot': 8901,
+    'lceil': 8968,
+    'rceil': 8969,
+    'lfloor': 8970,
+    'rfloor': 8971,
+    'lang': 9001,
+    'rang': 9002,
+    'loz': 9674,
+    'spades': 9824,
+    'clubs': 9827,
+    'hearts': 9829,
+    'diams': 9830
+  }
+
+  Object.keys(sax.ENTITIES).forEach(function (key) {
+    var e = sax.ENTITIES[key]
+    var s = typeof e === 'number' ? String.fromCharCode(e) : e
+    sax.ENTITIES[key] = s
+  })
+
+  for (var s in sax.STATE) {
+    sax.STATE[sax.STATE[s]] = s
+  }
+
+  // shorthand
+  S = sax.STATE
+
+  function emit (parser, event, data) {
+    parser[event] && parser[event](data)
+  }
+
+  function emitNode (parser, nodeType, data) {
+    if (parser.textNode) closeText(parser)
+    emit(parser, nodeType, data)
+  }
+
+  function closeText (parser) {
+    parser.textNode = textopts(parser.opt, parser.textNode)
+    if (parser.textNode) emit(parser, 'ontext', parser.textNode)
+    parser.textNode = ''
+  }
+
+  function textopts (opt, text) {
+    if (opt.trim) text = text.trim()
+    if (opt.normalize) text = text.replace(/\s+/g, ' ')
+    return text
+  }
+
+  function error (parser, er) {
+    closeText(parser)
+    if (parser.trackPosition) {
+      er += '\nLine: ' + parser.line +
+        '\nColumn: ' + parser.column +
+        '\nChar: ' + parser.c
+    }
+    er = new Error(er)
+    parser.error = er
+    emit(parser, 'onerror', er)
+    return parser
+  }
+
+  function end (parser) {
+    if (parser.sawRoot && !parser.closedRoot) strictFail(parser, 'Unclosed root tag')
+    if ((parser.state !== S.BEGIN) &&
+      (parser.state !== S.BEGIN_WHITESPACE) &&
+      (parser.state !== S.TEXT)) {
+      error(parser, 'Unexpected end')
+    }
+    closeText(parser)
+    parser.c = ''
+    parser.closed = true
+    emit(parser, 'onend')
+    SAXParser.call(parser, parser.strict, parser.opt)
+    return parser
+  }
+
+  function strictFail (parser, message) {
+    if (typeof parser !== 'object' || !(parser instanceof SAXParser)) {
+      throw new Error('bad call to strictFail')
+    }
+    if (parser.strict) {
+      error(parser, message)
+    }
+  }
+
+  function newTag (parser) {
+    if (!parser.strict) parser.tagName = parser.tagName[parser.looseCase]()
+    var parent = parser.tags[parser.tags.length - 1] || parser
+    var tag = parser.tag = { name: parser.tagName, attributes: {} }
+
+    // will be overridden if tag contails an xmlns="foo" or xmlns:foo="bar"
+    if (parser.opt.xmlns) {
+      tag.ns = parent.ns
+    }
+    parser.attribList.length = 0
+    emitNode(parser, 'onopentagstart', tag)
+  }
+
+  function qname (name, attribute) {
+    var i = name.indexOf(':')
+    var qualName = i < 0 ? [ '', name ] : name.split(':')
+    var prefix = qualName[0]
+    var local = qualName[1]
+
+    // <x "xmlns"="http://foo">
+    if (attribute && name === 'xmlns') {
+      prefix = 'xmlns'
+      local = ''
+    }
+
+    return { prefix: prefix, local: local }
+  }
+
+  function attrib (parser) {
+    if (!parser.strict) {
+      parser.attribName = parser.attribName[parser.looseCase]()
+    }
+
+    if (parser.attribList.indexOf(parser.attribName) !== -1 ||
+      parser.tag.attributes.hasOwnProperty(parser.attribName)) {
+      parser.attribName = parser.attribValue = ''
+      return
+    }
+
+    if (parser.opt.xmlns) {
+      var qn = qname(parser.attribName, true)
+      var prefix = qn.prefix
+      var local = qn.local
+
+      if (prefix === 'xmlns') {
+        // namespace binding attribute. push the binding into scope
+        if (local === 'xml' && parser.attribValue !== XML_NAMESPACE) {
+          strictFail(parser,
+            'xml: prefix must be bound to ' + XML_NAMESPACE + '\n' +
+            'Actual: ' + parser.attribValue)
+        } else if (local === 'xmlns' && parser.attribValue !== XMLNS_NAMESPACE) {
+          strictFail(parser,
+            'xmlns: prefix must be bound to ' + XMLNS_NAMESPACE + '\n' +
+            'Actual: ' + parser.attribValue)
+        } else {
+          var tag = parser.tag
+          var parent = parser.tags[parser.tags.length - 1] || parser
+          if (tag.ns === parent.ns) {
+            tag.ns = Object.create(parent.ns)
+          }
+          tag.ns[local] = parser.attribValue
+        }
+      }
+
+      // defer onattribute events until all attributes have been seen
+      // so any new bindings can take effect. preserve attribute order
+      // so deferred events can be emitted in document order
+      parser.attribList.push([parser.attribName, parser.attribValue])
+    } else {
+      // in non-xmlns mode, we can emit the event right away
+      parser.tag.attributes[parser.attribName] = parser.attribValue
+      emitNode(parser, 'onattribute', {
+        name: parser.attribName,
+        value: parser.attribValue
+      })
+    }
+
+    parser.attribName = parser.attribValue = ''
+  }
+
+  function openTag (parser, selfClosing) {
+    if (parser.opt.xmlns) {
+      // emit namespace binding events
+      var tag = parser.tag
+
+      // add namespace info to tag
+      var qn = qname(parser.tagName)
+      tag.prefix = qn.prefix
+      tag.local = qn.local
+      tag.uri = tag.ns[qn.prefix] || ''
+
+      if (tag.prefix && !tag.uri) {
+        strictFail(parser, 'Unbound namespace prefix: ' +
+          JSON.stringify(parser.tagName))
+        tag.uri = qn.prefix
+      }
+
+      var parent = parser.tags[parser.tags.length - 1] || parser
+      if (tag.ns && parent.ns !== tag.ns) {
+        Object.keys(tag.ns).forEach(function (p) {
+          emitNode(parser, 'onopennamespace', {
+            prefix: p,
+            uri: tag.ns[p]
+          })
+        })
+      }
+
+      // handle deferred onattribute events
+      // Note: do not apply default ns to attributes:
+      //   http://www.w3.org/TR/REC-xml-names/#defaulting
+      for (var i = 0, l = parser.attribList.length; i < l; i++) {
+        var nv = parser.attribList[i]
+        var name = nv[0]
+        var value = nv[1]
+        var qualName = qname(name, true)
+        var prefix = qualName.prefix
+        var local = qualName.local
+        var uri = prefix === '' ? '' : (tag.ns[prefix] || '')
+        var a = {
+          name: name,
+          value: value,
+          prefix: prefix,
+          local: local,
+          uri: uri
+        }
+
+        // if there's any attributes with an undefined namespace,
+        // then fail on them now.
+        if (prefix && prefix !== 'xmlns' && !uri) {
+          strictFail(parser, 'Unbound namespace prefix: ' +
+            JSON.stringify(prefix))
+          a.uri = prefix
+        }
+        parser.tag.attributes[name] = a
+        emitNode(parser, 'onattribute', a)
+      }
+      parser.attribList.length = 0
+    }
+
+    parser.tag.isSelfClosing = !!selfClosing
+
+    // process the tag
+    parser.sawRoot = true
+    parser.tags.push(parser.tag)
+    emitNode(parser, 'onopentag', parser.tag)
+    if (!selfClosing) {
+      // special case for <script> in non-strict mode.
+      if (!parser.noscript && parser.tagName.toLowerCase() === 'script') {
+        parser.state = S.SCRIPT
+      } else {
+        parser.state = S.TEXT
+      }
+      parser.tag = null
+      parser.tagName = ''
+    }
+    parser.attribName = parser.attribValue = ''
+    parser.attribList.length = 0
+  }
+
+  function closeTag (parser) {
+    if (!parser.tagName) {
+      strictFail(parser, 'Weird empty close tag.')
+      parser.textNode += '</>'
+      parser.state = S.TEXT
+      return
+    }
+
+    if (parser.script) {
+      if (parser.tagName !== 'script') {
+        parser.script += '</' + parser.tagName + '>'
+        parser.tagName = ''
+        parser.state = S.SCRIPT
+        return
+      }
+      emitNode(parser, 'onscript', parser.script)
+      parser.script = ''
+    }
+
+    // first make sure that the closing tag actually exists.
+    // <a><b></c></b></a> will close everything, otherwise.
+    var t = parser.tags.length
+    var tagName = parser.tagName
+    if (!parser.strict) {
+      tagName = tagName[parser.looseCase]()
+    }
+    var closeTo = tagName
+    while (t--) {
+      var close = parser.tags[t]
+      if (close.name !== closeTo) {
+        // fail the first time in strict mode
+        strictFail(parser, 'Unexpected close tag')
+      } else {
+        break
+      }
+    }
+
+    // didn't find it.  we already failed for strict, so just abort.
+    if (t < 0) {
+      strictFail(parser, 'Unmatched closing tag: ' + parser.tagName)
+      parser.textNode += '</' + parser.tagName + '>'
+      parser.state = S.TEXT
+      return
+    }
+    parser.tagName = tagName
+    var s = parser.tags.length
+    while (s-- > t) {
+      var tag = parser.tag = parser.tags.pop()
+      parser.tagName = parser.tag.name
+      emitNode(parser, 'onclosetag', parser.tagName)
+
+      var x = {}
+      for (var i in tag.ns) {
+        x[i] = tag.ns[i]
+      }
+
+      var parent = parser.tags[parser.tags.length - 1] || parser
+      if (parser.opt.xmlns && tag.ns !== parent.ns) {
+        // remove namespace bindings introduced by tag
+        Object.keys(tag.ns).forEach(function (p) {
+          var n = tag.ns[p]
+          emitNode(parser, 'onclosenamespace', { prefix: p, uri: n })
+        })
+      }
+    }
+    if (t === 0) parser.closedRoot = true
+    parser.tagName = parser.attribValue = parser.attribName = ''
+    parser.attribList.length = 0
+    parser.state = S.TEXT
+  }
+
+  function parseEntity (parser) {
+    var entity = parser.entity
+    var entityLC = entity.toLowerCase()
+    var num
+    var numStr = ''
+
+    if (parser.ENTITIES[entity]) {
+      return parser.ENTITIES[entity]
+    }
+    if (parser.ENTITIES[entityLC]) {
+      return parser.ENTITIES[entityLC]
+    }
+    entity = entityLC
+    if (entity.charAt(0) === '#') {
+      if (entity.charAt(1) === 'x') {
+        entity = entity.slice(2)
+        num = parseInt(entity, 16)
+        numStr = num.toString(16)
+      } else {
+        entity = entity.slice(1)
+        num = parseInt(entity, 10)
+        numStr = num.toString(10)
+      }
+    }
+    entity = entity.replace(/^0+/, '')
+    if (isNaN(num) || numStr.toLowerCase() !== entity) {
+      strictFail(parser, 'Invalid character entity')
+      return '&' + parser.entity + ';'
+    }
+
+    return String.fromCodePoint(num)
+  }
+
+  function beginWhiteSpace (parser, c) {
+    if (c === '<') {
+      parser.state = S.OPEN_WAKA
+      parser.startTagPosition = parser.position
+    } else if (!isWhitespace(c)) {
+      // have to process this as a text node.
+      // weird, but happens.
+      strictFail(parser, 'Non-whitespace before first tag.')
+      parser.textNode = c
+      parser.state = S.TEXT
+    }
+  }
+
+  function charAt (chunk, i) {
+    var result = ''
+    if (i < chunk.length) {
+      result = chunk.charAt(i)
+    }
+    return result
+  }
+
+  function write (chunk) {
+    var parser = this
+    if (this.error) {
+      throw this.error
+    }
+    if (parser.closed) {
+      return error(parser,
+        'Cannot write after close. Assign an onready handler.')
+    }
+    if (chunk === null) {
+      return end(parser)
+    }
+    if (typeof chunk === 'object') {
+      chunk = chunk.toString()
+    }
+    var i = 0
+    var c = ''
+    while (true) {
+      c = charAt(chunk, i++)
+      parser.c = c
+
+      if (!c) {
+        break
+      }
+
+      if (parser.trackPosition) {
+        parser.position++
+        if (c === '\n') {
+          parser.line++
+          parser.column = 0
+        } else {
+          parser.column++
+        }
+      }
+
+      switch (parser.state) {
+        case S.BEGIN:
+          parser.state = S.BEGIN_WHITESPACE
+          if (c === '\uFEFF') {
+            continue
+          }
+          beginWhiteSpace(parser, c)
+          continue
+
+        case S.BEGIN_WHITESPACE:
+          beginWhiteSpace(parser, c)
+          continue
+
+        case S.TEXT:
+          if (parser.sawRoot && !parser.closedRoot) {
+            var starti = i - 1
+            while (c && c !== '<' && c !== '&') {
+              c = charAt(chunk, i++)
+              if (c && parser.trackPosition) {
+                parser.position++
+                if (c === '\n') {
+                  parser.line++
+                  parser.column = 0
+                } else {
+                  parser.column++
+                }
+              }
+            }
+            parser.textNode += chunk.substring(starti, i - 1)
+          }
+          if (c === '<' && !(parser.sawRoot && parser.closedRoot && !parser.strict)) {
+            parser.state = S.OPEN_WAKA
+            parser.startTagPosition = parser.position
+          } else {
+            if (!isWhitespace(c) && (!parser.sawRoot || parser.closedRoot)) {
+              strictFail(parser, 'Text data outside of root node.')
+            }
+            if (c === '&') {
+              parser.state = S.TEXT_ENTITY
+            } else {
+              parser.textNode += c
+            }
+          }
+          continue
+
+        case S.SCRIPT:
+          // only non-strict
+          if (c === '<') {
+            parser.state = S.SCRIPT_ENDING
+          } else {
+            parser.script += c
+          }
+          continue
+
+        case S.SCRIPT_ENDING:
+          if (c === '/') {
+            parser.state = S.CLOSE_TAG
+          } else {
+            parser.script += '<' + c
+            parser.state = S.SCRIPT
+          }
+          continue
+
+        case S.OPEN_WAKA:
+          // either a /, ?, !, or text is coming next.
+          if (c === '!') {
+            parser.state = S.SGML_DECL
+            parser.sgmlDecl = ''
+          } else if (isWhitespace(c)) {
+            // wait for it...
+          } else if (isMatch(nameStart, c)) {
+            parser.state = S.OPEN_TAG
+            parser.tagName = c
+          } else if (c === '/') {
+            parser.state = S.CLOSE_TAG
+            parser.tagName = ''
+          } else if (c === '?') {
+            parser.state = S.PROC_INST
+            parser.procInstName = parser.procInstBody = ''
+          } else {
+            strictFail(parser, 'Unencoded <')
+            // if there was some whitespace, then add that in.
+            if (parser.startTagPosition + 1 < parser.position) {
+              var pad = parser.position - parser.startTagPosition
+              c = new Array(pad).join(' ') + c
+            }
+            parser.textNode += '<' + c
+            parser.state = S.TEXT
+          }
+          continue
+
+        case S.SGML_DECL:
+          if ((parser.sgmlDecl + c).toUpperCase() === CDATA) {
+            emitNode(parser, 'onopencdata')
+            parser.state = S.CDATA
+            parser.sgmlDecl = ''
+            parser.cdata = ''
+          } else if (parser.sgmlDecl + c === '--') {
+            parser.state = S.COMMENT
+            parser.comment = ''
+            parser.sgmlDecl = ''
+          } else if ((parser.sgmlDecl + c).toUpperCase() === DOCTYPE) {
+            parser.state = S.DOCTYPE
+            if (parser.doctype || parser.sawRoot) {
+              strictFail(parser,
+                'Inappropriately located doctype declaration')
+            }
+            parser.doctype = ''
+            parser.sgmlDecl = ''
+          } else if (c === '>') {
+            emitNode(parser, 'onsgmldeclaration', parser.sgmlDecl)
+            parser.sgmlDecl = ''
+            parser.state = S.TEXT
+          } else if (isQuote(c)) {
+            parser.state = S.SGML_DECL_QUOTED
+            parser.sgmlDecl += c
+          } else {
+            parser.sgmlDecl += c
+          }
+          continue
+
+        case S.SGML_DECL_QUOTED:
+          if (c === parser.q) {
+            parser.state = S.SGML_DECL
+            parser.q = ''
+          }
+          parser.sgmlDecl += c
+          continue
+
+        case S.DOCTYPE:
+          if (c === '>') {
+            parser.state = S.TEXT
+            emitNode(parser, 'ondoctype', parser.doctype)
+            parser.doctype = true // just remember that we saw it.
+          } else {
+            parser.doctype += c
+            if (c === '[') {
+              parser.state = S.DOCTYPE_DTD
+            } else if (isQuote(c)) {
+              parser.state = S.DOCTYPE_QUOTED
+              parser.q = c
+            }
+          }
+          continue
+
+        case S.DOCTYPE_QUOTED:
+          parser.doctype += c
+          if (c === parser.q) {
+            parser.q = ''
+            parser.state = S.DOCTYPE
+          }
+          continue
+
+        case S.DOCTYPE_DTD:
+          parser.doctype += c
+          if (c === ']') {
+            parser.state = S.DOCTYPE
+          } else if (isQuote(c)) {
+            parser.state = S.DOCTYPE_DTD_QUOTED
+            parser.q = c
+          }
+          continue
+
+        case S.DOCTYPE_DTD_QUOTED:
+          parser.doctype += c
+          if (c === parser.q) {
+            parser.state = S.DOCTYPE_DTD
+            parser.q = ''
+          }
+          continue
+
+        case S.COMMENT:
+          if (c === '-') {
+            parser.state = S.COMMENT_ENDING
+          } else {
+            parser.comment += c
+          }
+          continue
+
+        case S.COMMENT_ENDING:
+          if (c === '-') {
+            parser.state = S.COMMENT_ENDED
+            parser.comment = textopts(parser.opt, parser.comment)
+            if (parser.comment) {
+              emitNode(parser, 'oncomment', parser.comment)
+            }
+            parser.comment = ''
+          } else {
+            parser.comment += '-' + c
+            parser.state = S.COMMENT
+          }
+          continue
+
+        case S.COMMENT_ENDED:
+          if (c !== '>') {
+            strictFail(parser, 'Malformed comment')
+            // allow <!-- blah -- bloo --> in non-strict mode,
+            // which is a comment of " blah -- bloo "
+            parser.comment += '--' + c
+            parser.state = S.COMMENT
+          } else {
+            parser.state = S.TEXT
+          }
+          continue
+
+        case S.CDATA:
+          if (c === ']') {
+            parser.state = S.CDATA_ENDING
+          } else {
+            parser.cdata += c
+          }
+          continue
+
+        case S.CDATA_ENDING:
+          if (c === ']') {
+            parser.state = S.CDATA_ENDING_2
+          } else {
+            parser.cdata += ']' + c
+            parser.state = S.CDATA
+          }
+          continue
+
+        case S.CDATA_ENDING_2:
+          if (c === '>') {
+            if (parser.cdata) {
+              emitNode(parser, 'oncdata', parser.cdata)
+            }
+            emitNode(parser, 'onclosecdata')
+            parser.cdata = ''
+            parser.state = S.TEXT
+          } else if (c === ']') {
+            parser.cdata += ']'
+          } else {
+            parser.cdata += ']]' + c
+            parser.state = S.CDATA
+          }
+          continue
+
+        case S.PROC_INST:
+          if (c === '?') {
+            parser.state = S.PROC_INST_ENDING
+          } else if (isWhitespace(c)) {
+            parser.state = S.PROC_INST_BODY
+          } else {
+            parser.procInstName += c
+          }
+          continue
+
+        case S.PROC_INST_BODY:
+          if (!parser.procInstBody && isWhitespace(c)) {
+            continue
+          } else if (c === '?') {
+            parser.state = S.PROC_INST_ENDING
+          } else {
+            parser.procInstBody += c
+          }
+          continue
+
+        case S.PROC_INST_ENDING:
+          if (c === '>') {
+            emitNode(parser, 'onprocessinginstruction', {
+              name: parser.procInstName,
+              body: parser.procInstBody
+            })
+            parser.procInstName = parser.procInstBody = ''
+            parser.state = S.TEXT
+          } else {
+            parser.procInstBody += '?' + c
+            parser.state = S.PROC_INST_BODY
+          }
+          continue
+
+        case S.OPEN_TAG:
+          if (isMatch(nameBody, c)) {
+            parser.tagName += c
+          } else {
+            newTag(parser)
+            if (c === '>') {
+              openTag(parser)
+            } else if (c === '/') {
+              parser.state = S.OPEN_TAG_SLASH
+            } else {
+              if (!isWhitespace(c)) {
+                strictFail(parser, 'Invalid character in tag name')
+              }
+              parser.state = S.ATTRIB
+            }
+          }
+          continue
+
+        case S.OPEN_TAG_SLASH:
+          if (c === '>') {
+            openTag(parser, true)
+            closeTag(parser)
+          } else {
+            strictFail(parser, 'Forward-slash in opening tag not followed by >')
+            parser.state = S.ATTRIB
+          }
+          continue
+
+        case S.ATTRIB:
+          // haven't read the attribute name yet.
+          if (isWhitespace(c)) {
+            continue
+          } else if (c === '>') {
+            openTag(parser)
+          } else if (c === '/') {
+            parser.state = S.OPEN_TAG_SLASH
+          } else if (isMatch(nameStart, c)) {
+            parser.attribName = c
+            parser.attribValue = ''
+            parser.state = S.ATTRIB_NAME
+          } else {
+            strictFail(parser, 'Invalid attribute name')
+          }
+          continue
+
+        case S.ATTRIB_NAME:
+          if (c === '=') {
+            parser.state = S.ATTRIB_VALUE
+          } else if (c === '>') {
+            strictFail(parser, 'Attribute without value')
+            parser.attribValue = parser.attribName
+            attrib(parser)
+            openTag(parser)
+          } else if (isWhitespace(c)) {
+            parser.state = S.ATTRIB_NAME_SAW_WHITE
+          } else if (isMatch(nameBody, c)) {
+            parser.attribName += c
+          } else {
+            strictFail(parser, 'Invalid attribute name')
+          }
+          continue
+
+        case S.ATTRIB_NAME_SAW_WHITE:
+          if (c === '=') {
+            parser.state = S.ATTRIB_VALUE
+          } else if (isWhitespace(c)) {
+            continue
+          } else {
+            strictFail(parser, 'Attribute without value')
+            parser.tag.attributes[parser.attribName] = ''
+            parser.attribValue = ''
+            emitNode(parser, 'onattribute', {
+              name: parser.attribName,
+              value: ''
+            })
+            parser.attribName = ''
+            if (c === '>') {
+              openTag(parser)
+            } else if (isMatch(nameStart, c)) {
+              parser.attribName = c
+              parser.state = S.ATTRIB_NAME
+            } else {
+              strictFail(parser, 'Invalid attribute name')
+              parser.state = S.ATTRIB
+            }
+          }
+          continue
+
+        case S.ATTRIB_VALUE:
+          if (isWhitespace(c)) {
+            continue
+          } else if (isQuote(c)) {
+            parser.q = c
+            parser.state = S.ATTRIB_VALUE_QUOTED
+          } else {
+            strictFail(parser, 'Unquoted attribute value')
+            parser.state = S.ATTRIB_VALUE_UNQUOTED
+            parser.attribValue = c
+          }
+          continue
+
+        case S.ATTRIB_VALUE_QUOTED:
+          if (c !== parser.q) {
+            if (c === '&') {
+              parser.state = S.ATTRIB_VALUE_ENTITY_Q
+            } else {
+              parser.attribValue += c
+            }
+            continue
+          }
+          attrib(parser)
+          parser.q = ''
+          parser.state = S.ATTRIB_VALUE_CLOSED
+          continue
+
+        case S.ATTRIB_VALUE_CLOSED:
+          if (isWhitespace(c)) {
+            parser.state = S.ATTRIB
+          } else if (c === '>') {
+            openTag(parser)
+          } else if (c === '/') {
+            parser.state = S.OPEN_TAG_SLASH
+          } else if (isMatch(nameStart, c)) {
+            strictFail(parser, 'No whitespace between attributes')
+            parser.attribName = c
+            parser.attribValue = ''
+            parser.state = S.ATTRIB_NAME
+          } else {
+            strictFail(parser, 'Invalid attribute name')
+          }
+          continue
+
+        case S.ATTRIB_VALUE_UNQUOTED:
+          if (!isAttribEnd(c)) {
+            if (c === '&') {
+              parser.state = S.ATTRIB_VALUE_ENTITY_U
+            } else {
+              parser.attribValue += c
+            }
+            continue
+          }
+          attrib(parser)
+          if (c === '>') {
+            openTag(parser)
+          } else {
+            parser.state = S.ATTRIB
+          }
+          continue
+
+        case S.CLOSE_TAG:
+          if (!parser.tagName) {
+            if (isWhitespace(c)) {
+              continue
+            } else if (notMatch(nameStart, c)) {
+              if (parser.script) {
+                parser.script += '</' + c
+                parser.state = S.SCRIPT
+              } else {
+                strictFail(parser, 'Invalid tagname in closing tag.')
+              }
+            } else {
+              parser.tagName = c
+            }
+          } else if (c === '>') {
+            closeTag(parser)
+          } else if (isMatch(nameBody, c)) {
+            parser.tagName += c
+          } else if (parser.script) {
+            parser.script += '</' + parser.tagName
+            parser.tagName = ''
+            parser.state = S.SCRIPT
+          } else {
+            if (!isWhitespace(c)) {
+              strictFail(parser, 'Invalid tagname in closing tag')
+            }
+            parser.state = S.CLOSE_TAG_SAW_WHITE
+          }
+          continue
+
+        case S.CLOSE_TAG_SAW_WHITE:
+          if (isWhitespace(c)) {
+            continue
+          }
+          if (c === '>') {
+            closeTag(parser)
+          } else {
+            strictFail(parser, 'Invalid characters in closing tag')
+          }
+          continue
+
+        case S.TEXT_ENTITY:
+        case S.ATTRIB_VALUE_ENTITY_Q:
+        case S.ATTRIB_VALUE_ENTITY_U:
+          var returnState
+          var buffer
+          switch (parser.state) {
+            case S.TEXT_ENTITY:
+              returnState = S.TEXT
+              buffer = 'textNode'
+              break
+
+            case S.ATTRIB_VALUE_ENTITY_Q:
+              returnState = S.ATTRIB_VALUE_QUOTED
+              buffer = 'attribValue'
+              break
+
+            case S.ATTRIB_VALUE_ENTITY_U:
+              returnState = S.ATTRIB_VALUE_UNQUOTED
+              buffer = 'attribValue'
+              break
+          }
+
+          if (c === ';') {
+            if (parser.opt.unparsedEntities) {
+              var parsedEntity = parseEntity(parser)
+              parser.entity = ''
+              parser.state = returnState
+              parser.write(parsedEntity)
+            } else {
+              parser[buffer] += parseEntity(parser)
+              parser.entity = ''
+              parser.state = returnState
+            }
+          } else if (isMatch(parser.entity.length ? entityBody : entityStart, c)) {
+            parser.entity += c
+          } else {
+            strictFail(parser, 'Invalid character in entity name')
+            parser[buffer] += '&' + parser.entity + c
+            parser.entity = ''
+            parser.state = returnState
+          }
+
+          continue
+
+        default: /* istanbul ignore next */ {
+          throw new Error(parser, 'Unknown state: ' + parser.state)
+        }
+      }
+    } // while
+
+    if (parser.position >= parser.bufferCheckPosition) {
+      checkBufferLength(parser)
+    }
+    return parser
+  }
+
+  /*! http://mths.be/fromcodepoint v0.1.0 by @mathias */
+  /* istanbul ignore next */
+  if (!String.fromCodePoint) {
+    (function () {
+      var stringFromCharCode = String.fromCharCode
+      var floor = Math.floor
+      var fromCodePoint = function () {
+        var MAX_SIZE = 0x4000
+        var codeUnits = []
+        var highSurrogate
+        var lowSurrogate
+        var index = -1
+        var length = arguments.length
+        if (!length) {
+          return ''
+        }
+        var result = ''
+        while (++index < length) {
+          var codePoint = Number(arguments[index])
+          if (
+            !isFinite(codePoint) || // `NaN`, `+Infinity`, or `-Infinity`
+            codePoint < 0 || // not a valid Unicode code point
+            codePoint > 0x10FFFF || // not a valid Unicode code point
+            floor(codePoint) !== codePoint // not an integer
+          ) {
+            throw RangeError('Invalid code point: ' + codePoint)
+          }
+          if (codePoint <= 0xFFFF) { // BMP code point
+            codeUnits.push(codePoint)
+          } else { // Astral code point; split in surrogate halves
+            // http://mathiasbynens.be/notes/javascript-encoding#surrogate-formulae
+            codePoint -= 0x10000
+            highSurrogate = (codePoint >> 10) + 0xD800
+            lowSurrogate = (codePoint % 0x400) + 0xDC00
+            codeUnits.push(highSurrogate, lowSurrogate)
+          }
+          if (index + 1 === length || codeUnits.length > MAX_SIZE) {
+            result += stringFromCharCode.apply(null, codeUnits)
+            codeUnits.length = 0
+          }
+        }
+        return result
+      }
+      /* istanbul ignore next */
+      if (Object.defineProperty) {
+        Object.defineProperty(String, 'fromCodePoint', {
+          value: fromCodePoint,
+          configurable: true,
+          writable: true
+        })
+      } else {
+        String.fromCodePoint = fromCodePoint
+      }
+    }())
+  }
+})(typeof exports === 'undefined' ? this.sax = {} : exports)
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"buffer":101,"stream":219,"string_decoder":234}],211:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 // prototype class for hash functions
@@ -55528,7 +53933,7 @@ Hash.prototype._update = function () {
 
 module.exports = Hash
 
-},{"safe-buffer":234}],237:[function(require,module,exports){
+},{"safe-buffer":208}],212:[function(require,module,exports){
 var exports = module.exports = function SHA (algorithm) {
   algorithm = algorithm.toLowerCase()
 
@@ -55545,7 +53950,7 @@ exports.sha256 = require('./sha256')
 exports.sha384 = require('./sha384')
 exports.sha512 = require('./sha512')
 
-},{"./sha":238,"./sha1":239,"./sha224":240,"./sha256":241,"./sha384":242,"./sha512":243}],238:[function(require,module,exports){
+},{"./sha":213,"./sha1":214,"./sha224":215,"./sha256":216,"./sha384":217,"./sha512":218}],213:[function(require,module,exports){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-0, as defined
  * in FIPS PUB 180-1
@@ -55641,7 +54046,7 @@ Sha.prototype._hash = function () {
 
 module.exports = Sha
 
-},{"./hash":236,"inherits":205,"safe-buffer":234}],239:[function(require,module,exports){
+},{"./hash":211,"inherits":171,"safe-buffer":208}],214:[function(require,module,exports){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
  * in FIPS PUB 180-1
@@ -55742,7 +54147,7 @@ Sha1.prototype._hash = function () {
 
 module.exports = Sha1
 
-},{"./hash":236,"inherits":205,"safe-buffer":234}],240:[function(require,module,exports){
+},{"./hash":211,"inherits":171,"safe-buffer":208}],215:[function(require,module,exports){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
  * in FIPS 180-2
@@ -55797,7 +54202,7 @@ Sha224.prototype._hash = function () {
 
 module.exports = Sha224
 
-},{"./hash":236,"./sha256":241,"inherits":205,"safe-buffer":234}],241:[function(require,module,exports){
+},{"./hash":211,"./sha256":216,"inherits":171,"safe-buffer":208}],216:[function(require,module,exports){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
  * in FIPS 180-2
@@ -55934,7 +54339,7 @@ Sha256.prototype._hash = function () {
 
 module.exports = Sha256
 
-},{"./hash":236,"inherits":205,"safe-buffer":234}],242:[function(require,module,exports){
+},{"./hash":211,"inherits":171,"safe-buffer":208}],217:[function(require,module,exports){
 var inherits = require('inherits')
 var SHA512 = require('./sha512')
 var Hash = require('./hash')
@@ -55993,7 +54398,7 @@ Sha384.prototype._hash = function () {
 
 module.exports = Sha384
 
-},{"./hash":236,"./sha512":243,"inherits":205,"safe-buffer":234}],243:[function(require,module,exports){
+},{"./hash":211,"./sha512":218,"inherits":171,"safe-buffer":208}],218:[function(require,module,exports){
 var inherits = require('inherits')
 var Hash = require('./hash')
 var Buffer = require('safe-buffer').Buffer
@@ -56255,7 +54660,7 @@ Sha512.prototype._hash = function () {
 
 module.exports = Sha512
 
-},{"./hash":236,"inherits":205,"safe-buffer":234}],244:[function(require,module,exports){
+},{"./hash":211,"inherits":171,"safe-buffer":208}],219:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -56386,35 +54791,35 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":173,"inherits":205,"readable-stream/lib/_stream_duplex.js":246,"readable-stream/lib/_stream_passthrough.js":247,"readable-stream/lib/_stream_readable.js":248,"readable-stream/lib/_stream_transform.js":249,"readable-stream/lib/_stream_writable.js":250,"readable-stream/lib/internal/streams/end-of-stream.js":254,"readable-stream/lib/internal/streams/pipeline.js":256}],245:[function(require,module,exports){
-arguments[4][119][0].apply(exports,arguments)
-},{"dup":119}],246:[function(require,module,exports){
-arguments[4][120][0].apply(exports,arguments)
-},{"./_stream_readable":248,"./_stream_writable":250,"_process":223,"dup":120,"inherits":205}],247:[function(require,module,exports){
-arguments[4][121][0].apply(exports,arguments)
-},{"./_stream_transform":249,"dup":121,"inherits":205}],248:[function(require,module,exports){
-arguments[4][122][0].apply(exports,arguments)
-},{"../errors":245,"./_stream_duplex":246,"./internal/streams/async_iterator":251,"./internal/streams/buffer_list":252,"./internal/streams/destroy":253,"./internal/streams/from":255,"./internal/streams/state":257,"./internal/streams/stream":258,"_process":223,"buffer":136,"dup":122,"events":173,"inherits":205,"string_decoder/":259,"util":91}],249:[function(require,module,exports){
-arguments[4][123][0].apply(exports,arguments)
-},{"../errors":245,"./_stream_duplex":246,"dup":123,"inherits":205}],250:[function(require,module,exports){
-arguments[4][124][0].apply(exports,arguments)
-},{"../errors":245,"./_stream_duplex":246,"./internal/streams/destroy":253,"./internal/streams/state":257,"./internal/streams/stream":258,"_process":223,"buffer":136,"dup":124,"inherits":205,"util-deprecate":262}],251:[function(require,module,exports){
-arguments[4][125][0].apply(exports,arguments)
-},{"./end-of-stream":254,"_process":223,"dup":125}],252:[function(require,module,exports){
-arguments[4][126][0].apply(exports,arguments)
-},{"buffer":136,"dup":126,"util":91}],253:[function(require,module,exports){
-arguments[4][127][0].apply(exports,arguments)
-},{"_process":223,"dup":127}],254:[function(require,module,exports){
-arguments[4][128][0].apply(exports,arguments)
-},{"../../../errors":245,"dup":128}],255:[function(require,module,exports){
-arguments[4][129][0].apply(exports,arguments)
-},{"dup":129}],256:[function(require,module,exports){
-arguments[4][130][0].apply(exports,arguments)
-},{"../../../errors":245,"./end-of-stream":254,"dup":130}],257:[function(require,module,exports){
-arguments[4][131][0].apply(exports,arguments)
-},{"../../../errors":245,"dup":131}],258:[function(require,module,exports){
-arguments[4][132][0].apply(exports,arguments)
-},{"dup":132,"events":173}],259:[function(require,module,exports){
+},{"events":139,"inherits":171,"readable-stream/lib/_stream_duplex.js":221,"readable-stream/lib/_stream_passthrough.js":222,"readable-stream/lib/_stream_readable.js":223,"readable-stream/lib/_stream_transform.js":224,"readable-stream/lib/_stream_writable.js":225,"readable-stream/lib/internal/streams/end-of-stream.js":229,"readable-stream/lib/internal/streams/pipeline.js":231}],220:[function(require,module,exports){
+arguments[4][84][0].apply(exports,arguments)
+},{"dup":84}],221:[function(require,module,exports){
+arguments[4][85][0].apply(exports,arguments)
+},{"./_stream_readable":223,"./_stream_writable":225,"_process":197,"dup":85,"inherits":171}],222:[function(require,module,exports){
+arguments[4][86][0].apply(exports,arguments)
+},{"./_stream_transform":224,"dup":86,"inherits":171}],223:[function(require,module,exports){
+arguments[4][87][0].apply(exports,arguments)
+},{"../errors":220,"./_stream_duplex":221,"./internal/streams/async_iterator":226,"./internal/streams/buffer_list":227,"./internal/streams/destroy":228,"./internal/streams/from":230,"./internal/streams/state":232,"./internal/streams/stream":233,"_process":197,"buffer":101,"dup":87,"events":139,"inherits":171,"string_decoder/":234,"util":56}],224:[function(require,module,exports){
+arguments[4][88][0].apply(exports,arguments)
+},{"../errors":220,"./_stream_duplex":221,"dup":88,"inherits":171}],225:[function(require,module,exports){
+arguments[4][89][0].apply(exports,arguments)
+},{"../errors":220,"./_stream_duplex":221,"./internal/streams/destroy":228,"./internal/streams/state":232,"./internal/streams/stream":233,"_process":197,"buffer":101,"dup":89,"inherits":171,"util-deprecate":236}],226:[function(require,module,exports){
+arguments[4][90][0].apply(exports,arguments)
+},{"./end-of-stream":229,"_process":197,"dup":90}],227:[function(require,module,exports){
+arguments[4][91][0].apply(exports,arguments)
+},{"buffer":101,"dup":91,"util":56}],228:[function(require,module,exports){
+arguments[4][92][0].apply(exports,arguments)
+},{"_process":197,"dup":92}],229:[function(require,module,exports){
+arguments[4][93][0].apply(exports,arguments)
+},{"../../../errors":220,"dup":93}],230:[function(require,module,exports){
+arguments[4][94][0].apply(exports,arguments)
+},{"dup":94}],231:[function(require,module,exports){
+arguments[4][95][0].apply(exports,arguments)
+},{"../../../errors":220,"./end-of-stream":229,"dup":95}],232:[function(require,module,exports){
+arguments[4][96][0].apply(exports,arguments)
+},{"../../../errors":220,"dup":96}],233:[function(require,module,exports){
+arguments[4][97][0].apply(exports,arguments)
+},{"dup":97,"events":139}],234:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -56711,73 +55116,174 @@ function simpleWrite(buf) {
 function simpleEnd(buf) {
   return buf && buf.length ? this.write(buf) : '';
 }
-},{"safe-buffer":260}],260:[function(require,module,exports){
-/* eslint-disable node/no-deprecated-api */
-var buffer = require('buffer')
-var Buffer = buffer.Buffer
+},{"safe-buffer":208}],235:[function(require,module,exports){
+var C = "\u037c"
+var COUNT = typeof Symbol == "undefined" ? "__" + C : Symbol.for(C)
+var SET = typeof Symbol == "undefined" ? "__styleSet" + Math.floor(Math.random() * 1e8) : Symbol("styleSet")
+var top = typeof globalThis != "undefined" ? globalThis : typeof window != "undefined" ? window : {}
 
-// alternative to using Object.keys for old browsers
-function copyProps (src, dst) {
-  for (var key in src) {
-    dst[key] = src[key]
+// :: - Style modules encapsulate a set of CSS rules defined from
+// JavaScript. Their definitions are only available in a given DOM
+// root after it has been _mounted_ there with `StyleModule.mount`.
+//
+// Style modules should be created once and stored somewhere, as
+// opposed to re-creating them every time you need them. The amount of
+// CSS rules generated for a given DOM root is bounded by the amount
+// of style modules that were used. So to avoid leaking rules, don't
+// create these dynamically, but treat them as one-time allocations.
+var StyleModule = exports.StyleModule = function StyleModule(spec, options) {
+  this.rules = []
+  var ref = options || {};
+  var finish = ref.finish;
+
+  function splitSelector(selector) {
+    return /^@/.test(selector) ? [selector] : selector.split(/,\s*/)
   }
-}
-if (Buffer.from && Buffer.alloc && Buffer.allocUnsafe && Buffer.allocUnsafeSlow) {
-  module.exports = buffer
-} else {
-  // Copy properties from require('buffer')
-  copyProps(buffer, exports)
-  exports.Buffer = SafeBuffer
-}
 
-function SafeBuffer (arg, encodingOrOffset, length) {
-  return Buffer(arg, encodingOrOffset, length)
-}
-
-// Copy static methods from Buffer
-copyProps(Buffer, SafeBuffer)
-
-SafeBuffer.from = function (arg, encodingOrOffset, length) {
-  if (typeof arg === 'number') {
-    throw new TypeError('Argument must not be a number')
-  }
-  return Buffer(arg, encodingOrOffset, length)
-}
-
-SafeBuffer.alloc = function (size, fill, encoding) {
-  if (typeof size !== 'number') {
-    throw new TypeError('Argument must be a number')
-  }
-  var buf = Buffer(size)
-  if (fill !== undefined) {
-    if (typeof encoding === 'string') {
-      buf.fill(fill, encoding)
-    } else {
-      buf.fill(fill)
+  function render(selectors, spec, target, isKeyframes) {
+    var local = [], isAt = /^@(\w+)\b/.exec(selectors[0]), keyframes = isAt && isAt[1] == "keyframes"
+    if (isAt && spec == null) { return target.push(selectors[0] + ";") }
+    for (var prop in spec) {
+      var value = spec[prop]
+      if (/&/.test(prop)) {
+        render(prop.split(/,\s*/).map(function (part) { return selectors.map(function (sel) { return part.replace(/&/, sel); }); }).reduce(function (a, b) { return a.concat(b); }),
+               value, target)
+      } else if (value && typeof value == "object") {
+        if (!isAt) { throw new RangeError("The value of a property (" + prop + ") should be a primitive value.") }
+        render(splitSelector(prop), value, local, keyframes)
+      } else if (value != null) {
+        local.push(prop.replace(/_.*/, "").replace(/[A-Z]/g, function (l) { return "-" + l.toLowerCase(); }) + ": " + value + ";")
+      }
     }
+    if (local.length || keyframes) {
+      target.push((finish && !isAt && !isKeyframes ? selectors.map(finish) : selectors).join(", ") +
+                  " {" + local.join(" ") + "}")
+    }
+  }
+
+  for (var prop in spec) { render(splitSelector(prop), spec[prop], this.rules) }
+};
+
+// :: () → string
+// Returns a string containing the module's CSS rules.
+StyleModule.prototype.getRules = function getRules () { return this.rules.join("\n") };
+
+// :: () → string
+// Generate a new unique CSS class name.
+StyleModule.newName = function newName () {
+  var id = top[COUNT] || 1
+  top[COUNT] = id + 1
+  return C + id.toString(36)
+};
+
+// :: (union<Document, ShadowRoot>, union<[StyleModule], StyleModule>, ?{nonce: ?string})
+//
+// Mount the given set of modules in the given DOM root, which ensures
+// that the CSS rules defined by the module are available in that
+// context.
+//
+// Rules are only added to the document once per root.
+//
+// Rule order will follow the order of the modules, so that rules from
+// modules later in the array take precedence of those from earlier
+// modules. If you call this function multiple times for the same root
+// in a way that changes the order of already mounted modules, the old
+// order will be changed.
+//
+// If a Content Security Policy nonce is provided, it is added to
+// the `<style>` tag generated by the library.
+StyleModule.mount = function mount (root, modules, options) {
+  var set = root[SET], nonce = options && options.nonce
+  if (!set) { set = new StyleSet(root, nonce) }
+  else if (nonce) { set.setNonce(nonce) }
+  set.mount(Array.isArray(modules) ? modules : [modules])
+};
+
+var adoptedSet = new Map //<Document, StyleSet>
+
+var StyleSet = function StyleSet(root, nonce) {
+  var doc = root.ownerDocument || root, win = doc.defaultView
+  if (!root.head && root.adoptedStyleSheets && win.CSSStyleSheet) {
+    var adopted = adoptedSet.get(doc)
+    if (adopted) {
+      root.adoptedStyleSheets = [adopted.sheet ].concat( root.adoptedStyleSheets)
+      return root[SET] = adopted
+    }
+    this.sheet = new win.CSSStyleSheet
+    root.adoptedStyleSheets = [this.sheet ].concat( root.adoptedStyleSheets)
+    adoptedSet.set(doc, this)
   } else {
-    buf.fill(0)
+    this.styleTag = doc.createElement("style")
+    if (nonce) { this.styleTag.setAttribute("nonce", nonce) }
+    var target = root.head || root
+    target.insertBefore(this.styleTag, target.firstChild)
   }
-  return buf
-}
+  this.modules = []
+  root[SET] = this
+};
 
-SafeBuffer.allocUnsafe = function (size) {
-  if (typeof size !== 'number') {
-    throw new TypeError('Argument must be a number')
+StyleSet.prototype.mount = function mount (modules) {
+  var sheet = this.sheet
+  var pos = 0 /* Current rule offset */, j = 0 /* Index into this.modules */
+  for (var i = 0; i < modules.length; i++) {
+    var mod = modules[i], index = this.modules.indexOf(mod)
+    if (index < j && index > -1) { // Ordering conflict
+      this.modules.splice(index, 1)
+      j--
+      index = -1
+    }
+    if (index == -1) {
+      this.modules.splice(j++, 0, mod)
+      if (sheet) { for (var k = 0; k < mod.rules.length; k++)
+        { sheet.insertRule(mod.rules[k], pos++) } }
+    } else {
+      while (j < index) { pos += this.modules[j++].rules.length }
+      pos += mod.rules.length
+      j++
+    }
   }
-  return Buffer(size)
-}
 
-SafeBuffer.allocUnsafeSlow = function (size) {
-  if (typeof size !== 'number') {
-    throw new TypeError('Argument must be a number')
+  if (!sheet) {
+    var text = ""
+    for (var i$1 = 0; i$1 < this.modules.length; i$1++)
+      { text += this.modules[i$1].getRules() + "\n" }
+    this.styleTag.textContent = text
   }
-  return buffer.SlowBuffer(size)
-}
+};
 
-},{"buffer":136}],261:[function(require,module,exports){
-arguments[4][61][0].apply(exports,arguments)
-},{"dup":61}],262:[function(require,module,exports){
+StyleSet.prototype.setNonce = function setNonce (nonce) {
+  if (this.styleTag && this.styleTag.getAttribute("nonce") != nonce)
+    { this.styleTag.setAttribute("nonce", nonce) }
+};
+
+// Style::Object<union<Style,string>>
+//
+// A style is an object that, in the simple case, maps CSS property
+// names to strings holding their values, as in `{color: "red",
+// fontWeight: "bold"}`. The property names can be given in
+// camel-case—the library will insert a dash before capital letters
+// when converting them to CSS.
+//
+// If you include an underscore in a property name, it and everything
+// after it will be removed from the output, which can be useful when
+// providing a property multiple times, for browser compatibility
+// reasons.
+//
+// A property in a style object can also be a sub-selector, which
+// extends the current context to add a pseudo-selector or a child
+// selector. Such a property should contain a `&` character, which
+// will be replaced by the current selector. For example `{"&:before":
+// {content: '"hi"'}}`. Sub-selectors and regular properties can
+// freely be mixed in a given object. Any property containing a `&` is
+// assumed to be a sub-selector.
+//
+// Finally, a property can specify an @-block to be wrapped around the
+// styles defined inside the object that's the property's value. For
+// example to create a media query you can do `{"@media screen and
+// (min-width: 400px)": {...}}`.
+
+
+},{}],236:[function(require,module,exports){
 (function (global){(function (){
 
 /**
@@ -56848,11 +55354,1460 @@ function config (name) {
 }
 
 }).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],263:[function(require,module,exports){
+},{}],237:[function(require,module,exports){
+'use strict';
+
+const handleScope = (info, str) => {
+  const [type, name] = str.split(/\s+/);
+  const ero = {kind: 'scope', type, name, body: []};
+  const current = info.stack[info.stack.length - 1];
+  current.body.push(ero);
+  info.stack.push(ero);
+  // console.log(ero);
+};
+
+const handleUpScope = (info /* , str */) => {
+  info.stack.pop();
+  // console.log(['upscope', str]);
+};
+
+const handleVar = (info, str) => {
+  // reg 3 ( r_reg [2:0]
+  // 0   1 2 3+
+  const eroj = str.split(/\s+/);
+  const ero = {
+    kind: 'var',
+    type: eroj[0],
+    size: parseInt(eroj[1]),
+    link: eroj[2],
+    name: eroj.slice(3).join('')
+  };
+  {
+    const m = ero.name.match('^(?<name>\\w+)\\[' + (ero.size - 1) + ':0]$');
+    if (m) {
+      ero.name = m.groups.name;
+    }
+  }
+  const current = info.stack[info.stack.length - 1];
+  current.body.push(ero);
+  // console.log(ero);
+};
+
+const commandHandler = (info, cmd, str) => {
+  str = str.trim();
+  switch(cmd) {
+  case 1:
+    info.comment = str;
+    // console.log(['comment', str]);
+    break;
+  case 2:
+    info.date = str;
+    // console.log(['date', str]);
+    break;
+  case 3:
+    handleScope(info, str);
+    break;
+  case 4:
+    info.timescale = str;
+    // console.log(['timescale', str]);
+    break;
+  case 5:
+    handleUpScope(info, str);
+    break;
+  case 6:
+    handleVar(info, str);
+    break;
+  case 7:
+    info.version = str;
+    // console.log(['version', str]);
+    break;
+  default:
+    console.log([cmd, str]);
+  }
+};
+
+module.exports = commandHandler;
+
+},{}],238:[function(require,module,exports){
+'use strict';
+
+const maxChunkLength = 1 << 17; // Number.MAX_SAFE_INTEGER; // 5e6; // 300000; // 1 << 23;
+
+const getVcd = async (readers, content, inst) => {
+  const r = readers.find(reader => reader.ext === 'vcd');
+  if (r) {
+    // console.log('VCD', r);
+    document.title = r.baseName;
+    content.innerHTML = '<div class="wd-progress">LOADING...</div>';
+    let total = 0;
+    outerLoop:
+    for (let i = 0; i < 1e5; i++) {
+      const { done, value } = await r.reader.read();
+
+      if (done && (value === undefined)) {
+        // console.log('the end');
+        inst.end();
+        break outerLoop;
+      }
+      const len = value.length;
+      for (let j = 0; j < len; j += maxChunkLength) {
+        const value1 = value.slice(j, j + maxChunkLength);
+        const len1 = value1.length;
+        total += len1;
+
+        // const vh = u8toStr(value1.slice(0, 100));
+        // const vt = u8toStr(value1.slice(-100));
+        // console.log({len1, done, total, vh, vt});
+
+        content.innerHTML = '<div class="wd-progress">' + total.toLocaleString() + '</div>';
+        if (done && ((j + maxChunkLength) >= len)) {
+          // console.log('last chunk');
+          inst.end(value1);
+          break outerLoop;
+        }
+        inst.write(value1);
+      }
+    }
+  }
+};
+
+module.exports = getVcd;
+
+/* eslint-env browser */
+
+},{}],239:[function(require,module,exports){
+'use strict';
+
+const parseTimescale = str => {
+  if (typeof str !== 'string') {
+    return;
+  }
+  const str1 = str.trim();
+  const m = str1.match(/^(\d+)\s*(\w+)$/);
+  const res1 = ({1: 0, 10: 1, 100: 2})[m[1]];
+  const res2 = ({s: 0, ms: -3, us: -6, ns: -9, ps: -12, fs: -15})[m[2]];
+  return res1 + res2;
+};
+
+module.exports = parseTimescale;
+
+},{}],240:[function(require,module,exports){
+'use strict';
+
+const parseTimescale = require('./parse-time-scale.js');
+
+const MAX_SAFE_INTEGER = BigInt(Number.MAX_SAFE_INTEGER);
+
+const numberOrString = val => {
+  if (val < MAX_SAFE_INTEGER) {
+    return Number(val);
+  }
+  return '0x' + val.toString(16);
+};
+
+const gcd = (a, b) => {
+  if (a === undefined) {
+    return b;
+  }
+  let r;
+  while (b !== 0) {
+    r = a % b;
+    a = b;
+    b = r;
+  }
+  return (a < 0) ? -a : a;
+};
+
+const tNorm = o => {
+  const {tgcd, chango} = o;
+
+  o.t0 /= tgcd;
+  o.time /= tgcd;
+  Object.keys(chango).map(key => {
+    const {wave} = chango[key];
+    wave.map(e => {
+      e[0] /= tgcd;
+    });
+  });
+
+  const exp = Math.log10(tgcd) |0;
+  if (exp > 0) {
+    const scale = Math.pow(10, exp);
+    const tgcd1 = tgcd / scale;
+    if (tgcd1 === (tgcd1 |0)) {
+      o.tgcd = tgcd1;
+      o.timescale += exp;
+    }
+  }
+  return o;
+};
+
+
+module.exports = async (deso, inst, done) => {
+  const chango = {};
+  let tgcd;
+  deso.chango = chango;
+  deso.view = [];
+
+  const onAnyChange = (id, time, cmd, value, mask) => {
+    // console.log(id, time, cmd, value, mask);
+    const time53 = Number(time);
+    tgcd = gcd(tgcd, time53);
+    chango[id] = chango[id] || {wave: []};
+    if (cmd >= 14 && cmd <= 28) {
+      chango[id].kind = 'bit';
+      chango[id].wave.push([time53, cmd - 14]);
+    } else {
+      chango[id].kind = 'vec';
+      const point = [time53, numberOrString(value)];
+      if (mask !== 0n) {
+        point.push(numberOrString(mask));
+      }
+      chango[id].wave.push(point);
+    }
+  };
+
+  const t0 = Date.now();
+
+  inst.on('$enddefinitions', () => {
+    // console.log('$enddefinitions');
+    Object.assign(deso.wires, inst.info.wires);
+    deso.timescale = parseTimescale(inst.info.timescale);
+  });
+
+  inst.change.any(onAnyChange);
+
+  inst.on('finish', () => {
+    console.log((Date.now() - t0) / 1000);
+    deso.tgcd = tgcd;
+    deso.t0 = (inst.info.t0 || 0);
+    // console.log(inst.getTime());
+    deso.time = Number(inst.getTime());
+    tNorm(deso);
+    done(deso);
+  });
+};
+
+},{"./parse-time-scale.js":239}],241:[function(require,module,exports){
+'use strict';
+
+const stream = require('stream');
+const EventEmitter = require('events').EventEmitter;
+
+const dotProp = require('dot-prop');
+
+const commandHandler = require('./command-handler.js');
+
+// function _waitForStart(mod) {
+//   return new Promise((resolve)=>{
+//     mod.addOnPostRun(resolve);
+//   });
+// }
+
+// function u8ToBn(u8) {
+//   let str = '';
+//   for (let i = 0; i < u8.length; i++) {
+//     const val = u8[i];
+//     str = val.toString(16) + str;
+//     if (val < 16) {
+//       str = '0' + str;
+//     }
+//   }
+//   return BigInt('0x' + str);
+// }
+
+function h8ToBn(HEAPU8, start, len) {
+  if (len === 0) {
+    return 0n;
+  }
+  let str = '';
+  const fin = start + len * 8;
+  for (let i = start; i < fin; i++) {
+    const val = HEAPU8[i];
+    str = val.toString(16) + str;
+    if (val < 16) {
+      str = '0' + str;
+    }
+  }
+  return BigInt('0x' + str);
+}
+
+// let startCalled = 0;
+
+const bindCWrap = (c, wasm) => {
+  const w = wasm.cwrap;
+  c.execute    = w('execute',    'number', ['number', 'number', 'number', 'number', 'number', 'array', 'number']);
+  c.init       = w('init',       'number', ['number', 'number', 'number', 'number']);
+  c.getTime    = w('getTime',    'number', ['number']);
+  c.setTrigger = w('setTrigger', 'number', ['number', 'string']);
+};
+
+const getWrapper = wasm => {
+  // console.log(wasm);
+
+  const c = {};
+
+  let bindCallback;
+
+
+  const start = async() => {
+    // if( !startCalled ) {
+    //   await _waitForStart(wasm);
+    //   startCalled++;
+    // }
+    // console.log('s1');
+    bindCWrap(c, wasm);
+    // console.log('s2');
+    bindCallback();
+    // console.log('s3');
+  };
+
+  // gets a string from a c heap pointer and length
+  const getString = (name, len) => {
+
+    // const view = wasm.HEAPU8.subarray(name, name+len);
+    // let string = '';
+    // for (let i = 0; i < len; i++) {
+    //   string += String.fromCharCode(view[i]);
+    // }
+    // return string;
+
+    let string = '';
+    const end = name + len;
+    for (let i = name; i < end; i++) {
+      string += String.fromCharCode(wasm.HEAPU8[i]);
+    }
+    return string;
+
+  };
+
+  let boundInfo;
+
+  let boundSet;
+  let boundGet;
+
+  let ee = [];
+
+  let boundEE0;
+  let boundEE1;
+
+  let context = -1;
+
+
+  const onEE1 = (
+    /* const char* */   eventName,
+    /* const size_t */  eventNameLength, // strlen(name)
+    /* const int64_t */ time,
+    /* const int */     cmd,
+    /* const int */     valueWords,
+    /* uint64_t* */     value,
+    /* const int */     maskWords,
+    /* uint64_t* */     mask
+  ) => {
+    const name = getString(eventName, eventNameLength);
+    // console.log(`event name`);
+    // console.log({name, time, command, valueWords});
+
+
+
+    // const view0 = wasm.HEAPU8.subarray(value, value+(valueWords*8));
+    // const view1 = wasm.HEAPU8.subarray(mask,  mask+(valueWords*8));
+
+    // let bigValue = u8ToBn(view0);
+    // let bigMask = u8ToBn(view1);
+    // let bigValue = 0n;
+
+    // console.log(bigValue.toString(16));
+
+    if (cmd >= 14 && cmd <= 28) {
+      ee[1](name, time, cmd);
+    } else {
+      const bigValue = h8ToBn(wasm.HEAPU8, value, valueWords);
+      const bigMask = h8ToBn(wasm.HEAPU8, mask, maskWords);
+      ee[1](name, time, cmd, bigValue, bigMask);
+    }
+  };
+
+  // wasm.addFunction can't be called until after
+  // start finishes
+  bindCallback = () => {
+    boundSet = wasm.addFunction(function(name, len, type, v0, v1) {
+
+      let prop = getString(name, len);
+      let tmp;
+
+      switch(type) {
+      // set number
+      case 0:
+        boundInfo[prop] = v0;
+        // console.log(`setting ${prop} to ${boundInfo[prop]}`);
+        break;
+      // set string
+      case 1:
+        boundInfo[prop] = getString(v0, v1);
+        // console.log(`setting ${prop} to ${boundInfo[prop]}`);
+        break;
+      // set string to path
+      case 2:
+        dotProp.set(boundInfo, prop, getString(v0, v1));
+        // console.log(`setting ${prop} to ${getString(v0, v1)}`);
+        break;
+      // path to path (any type)
+      case 3:
+        tmp = getString(v0, v1)
+          .split(',')
+          .map(e => dotProp.get(boundInfo, e));
+        if (tmp.length === 1) {
+          dotProp.set(boundInfo, prop, tmp[0]);
+          break;
+        }
+        dotProp.set(boundInfo, prop, tmp);
+        break;
+      // create empty object at path
+      case 4:
+        // console.log(`${prop} is new {}`);
+        dotProp.set(boundInfo, prop, {});
+        break;
+      case 5:
+        commandHandler(boundInfo, v0, prop);
+        break;
+      default: throw new Error();
+      }
+
+
+      // viiiii means returns void, accepts int int int int int
+    }, 'viiiii');
+
+    boundGet = wasm.addFunction(function(name, len) {
+      let prop = getString(name, len);
+      return prop;
+    }, 'iii');
+
+
+    boundEE0 = wasm.addFunction(function(name, len) {
+      ee[0](getString(name, len));
+    }, 'vii');
+
+    boundEE1 = wasm.addFunction(onEE1, 'viijiiiii');
+
+  };
+
+  return {
+    start,
+    c,
+    init: (cb0, cb1, info) => {
+      boundInfo = info;
+      ee[0] = cb0;
+      ee[1] = cb1;
+      context = c.init(boundEE0, boundEE1, boundSet, boundGet);
+      return context;
+    },
+    execute: (ctx, cb0, cb1, info, chunk) => {
+      boundInfo = info;
+      ee[0] = cb0;
+      ee[1] = cb1;
+      return c.execute(ctx, boundEE0, boundEE1, boundSet, boundGet, chunk, chunk.length);
+    },
+    setTrigger: (ctx, triggerString) => {
+      return c.setTrigger(ctx, triggerString);
+    },
+    getTime: (ctx) => {
+      return BigInt(c.getTime(ctx));
+    }
+  };
+
+};
+
+module.exports = async wasm => {
+  const lib = getWrapper(wasm);
+  // console.log('getWrapper', lib);
+  await lib.start();
+  // console.log('vcd wasm srarted');
+  const wires = {kind: 'scope', type: '.', name: '.', body: []};
+  const info = {stack: [wires], wires};
+
+  const s = new stream.Writable();
+
+  // gets called by c with 1 argument, a string
+  const lifemit = s.emit.bind(s);
+
+  const triee = new EventEmitter();
+
+  // gets called by c with 5 arguments
+  // string        eventName
+  // number        state->time
+  // int           command
+  // int           state->value
+  // int           state->mask
+
+  const triemit = triee.emit.bind(triee);
+  let triemit2 = triemit;
+
+  const cxt = lib.init(lifemit, triemit, info);
+
+  s._write = function (chunk, encoding, callback) {
+    // console.log('chunk:', chunk.length);
+    const err = lib.execute(cxt, lifemit, triemit2, info, chunk);
+    if (err) {
+      console.log(err);
+    }
+    // console.log(util.inspect(info, {showHidden: true, depth : null, colorize: true}));
+    // console.log(info.stack[0].top);
+    // console.log(info.stack[1]);
+    // console.log(info.stack[0].top == info.stack[1]);
+    callback();
+  };
+
+  s.change = {
+    on: (id, fn) => {
+      triemit2 = triemit;
+      triee.on(id, fn);
+      const triggerString = triee.eventNames().join(' ') + '  ';
+      // console.log(id, Buffer.from(triggerString));
+      lib.setTrigger(cxt, triggerString);
+    },
+    any: fn => {
+      triemit2 = fn;
+      lib.setTrigger(cxt, '\0');
+    }
+  };
+
+  s.info = info;
+
+  s.getTime = () => lib.getTime(cxt);
+
+  s.start = lib.start;
+
+  return s;
+};
+
+},{"./command-handler.js":237,"dot-prop":121,"events":139,"stream":219}],242:[function(require,module,exports){
+(function (process,Buffer,__filename,__argument0,__argument1,__argument2,__argument3,__dirname){(function (){
+
+var createVCD = (() => {
+  var _scriptDir = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
+  if (typeof __filename !== 'undefined') _scriptDir = _scriptDir || __filename;
+  return (
+function(createVCD = {})  {
+
+var Module=typeof createVCD!="undefined"?createVCD:{};var readyPromiseResolve,readyPromiseReject;Module["ready"]=new Promise(function(resolve,reject){readyPromiseResolve=resolve;readyPromiseReject=reject});var moduleOverrides=Object.assign({},Module);var arguments_=[];var thisProgram="./this.program";var quit_=(status,toThrow)=>{throw toThrow};var ENVIRONMENT_IS_WEB=typeof window=="object";var ENVIRONMENT_IS_WORKER=typeof importScripts=="function";var ENVIRONMENT_IS_NODE=typeof process=="object"&&typeof process.versions=="object"&&typeof process.versions.node=="string";var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var read_,readAsync,readBinary,setWindowTitle;if(ENVIRONMENT_IS_NODE){var fs=require("fs");var nodePath=require("path");if(ENVIRONMENT_IS_WORKER){scriptDirectory=nodePath.dirname(scriptDirectory)+"/"}else{scriptDirectory=__dirname+"/"}read_=(filename,binary)=>{filename=isFileURI(filename)?new URL(filename):nodePath.normalize(filename);return fs.readFileSync(filename,binary?undefined:"utf8")};readBinary=filename=>{var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret)}return ret};readAsync=(filename,onload,onerror)=>{filename=isFileURI(filename)?new URL(filename):nodePath.normalize(filename);fs.readFile(filename,function(err,data){if(err)onerror(err);else onload(data.buffer)})};if(!Module["thisProgram"]&&process.argv.length>1){thisProgram=process.argv[1].replace(/\\/g,"/")}arguments_=process.argv.slice(2);quit_=(status,toThrow)=>{process.exitCode=status;throw toThrow};Module["inspect"]=function(){return"[Emscripten Module object]"}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){if(ENVIRONMENT_IS_WORKER){scriptDirectory=self.location.href}else if(typeof document!="undefined"&&document.currentScript){scriptDirectory=document.currentScript.src}if(_scriptDir){scriptDirectory=_scriptDir}if(scriptDirectory.indexOf("blob:")!==0){scriptDirectory=scriptDirectory.substr(0,scriptDirectory.replace(/[?#].*/,"").lastIndexOf("/")+1)}else{scriptDirectory=""}{read_=url=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.send(null);return xhr.responseText};if(ENVIRONMENT_IS_WORKER){readBinary=url=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)}}readAsync=(url,onload,onerror)=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,true);xhr.responseType="arraybuffer";xhr.onload=()=>{if(xhr.status==200||xhr.status==0&&xhr.response){onload(xhr.response);return}onerror()};xhr.onerror=onerror;xhr.send(null)}}setWindowTitle=title=>document.title=title}else{}var out=Module["print"]||console.log.bind(console);var err=Module["printErr"]||console.warn.bind(console);Object.assign(Module,moduleOverrides);moduleOverrides=null;if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["quit"])quit_=Module["quit"];var wasmBinary;if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];var noExitRuntime=Module["noExitRuntime"]||true;if(typeof WebAssembly!="object"){abort("no native wasm support detected")}var wasmMemory;var ABORT=false;var EXITSTATUS;function assert(condition,text){if(!condition){abort(text)}}var HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAP64,HEAPU64,HEAPF64;function updateMemoryViews(){var b=wasmMemory.buffer;Module["HEAP8"]=HEAP8=new Int8Array(b);Module["HEAP16"]=HEAP16=new Int16Array(b);Module["HEAP32"]=HEAP32=new Int32Array(b);Module["HEAPU8"]=HEAPU8=new Uint8Array(b);Module["HEAPU16"]=HEAPU16=new Uint16Array(b);Module["HEAPU32"]=HEAPU32=new Uint32Array(b);Module["HEAPF32"]=HEAPF32=new Float32Array(b);Module["HEAPF64"]=HEAPF64=new Float64Array(b);Module["HEAP64"]=HEAP64=new BigInt64Array(b);Module["HEAPU64"]=HEAPU64=new BigUint64Array(b)}var wasmTable;var __ATPRERUN__=[];var __ATINIT__=[];var __ATMAIN__=[];var __ATPOSTRUN__=[];var runtimeInitialized=false;var runtimeKeepaliveCounter=0;function keepRuntimeAlive(){return noExitRuntime||runtimeKeepaliveCounter>0}function preRun(){if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift())}}callRuntimeCallbacks(__ATPRERUN__)}function initRuntime(){runtimeInitialized=true;if(!Module["noFSInit"]&&!FS.init.initialized)FS.init();FS.ignorePermissions=false;TTY.init();callRuntimeCallbacks(__ATINIT__)}function preMain(){callRuntimeCallbacks(__ATMAIN__)}function postRun(){if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift())}}callRuntimeCallbacks(__ATPOSTRUN__)}function addOnPreRun(cb){__ATPRERUN__.unshift(cb)}function addOnInit(cb){__ATINIT__.unshift(cb)}function addOnPostRun(cb){__ATPOSTRUN__.unshift(cb)}var runDependencies=0;var runDependencyWatcher=null;var dependenciesFulfilled=null;function getUniqueRunDependency(id){return id}function addRunDependency(id){runDependencies++;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies)}}function removeRunDependency(id){runDependencies--;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies)}if(runDependencies==0){if(runDependencyWatcher!==null){clearInterval(runDependencyWatcher);runDependencyWatcher=null}if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback()}}}function abort(what){if(Module["onAbort"]){Module["onAbort"](what)}what="Aborted("+what+")";err(what);ABORT=true;EXITSTATUS=1;what+=". Build with -sASSERTIONS for more info.";var e=new WebAssembly.RuntimeError(what);readyPromiseReject(e);throw e}var dataURIPrefix="data:application/octet-stream;base64,";function isDataURI(filename){return filename.startsWith(dataURIPrefix)}function isFileURI(filename){return filename.startsWith("file://")}var wasmBinaryFile;wasmBinaryFile="vcd.wasm";if(!isDataURI(wasmBinaryFile)){wasmBinaryFile=locateFile(wasmBinaryFile)}function getBinary(file){try{if(file==wasmBinaryFile&&wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(file)}throw"both async and sync fetching of the wasm failed"}catch(err){abort(err)}}function getBinaryPromise(binaryFile){if(!wasmBinary&&(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER)){if(typeof fetch=="function"&&!isFileURI(binaryFile)){return fetch(binaryFile,{credentials:"same-origin"}).then(function(response){if(!response["ok"]){throw"failed to load wasm binary file at '"+binaryFile+"'"}return response["arrayBuffer"]()}).catch(function(){return getBinary(binaryFile)})}else{if(readAsync){return new Promise(function(resolve,reject){readAsync(binaryFile,function(response){resolve(new Uint8Array(response))},reject)})}}}return Promise.resolve().then(function(){return getBinary(binaryFile)})}function instantiateArrayBuffer(binaryFile,imports,receiver){return getBinaryPromise(binaryFile).then(function(binary){return WebAssembly.instantiate(binary,imports)}).then(function(instance){return instance}).then(receiver,function(reason){err("failed to asynchronously prepare wasm: "+reason);abort(reason)})}function instantiateAsync(binary,binaryFile,imports,callback){if(!binary&&typeof WebAssembly.instantiateStreaming=="function"&&!isDataURI(binaryFile)&&!isFileURI(binaryFile)&&!ENVIRONMENT_IS_NODE&&typeof fetch=="function"){return fetch(binaryFile,{credentials:"same-origin"}).then(function(response){var result=WebAssembly.instantiateStreaming(response,imports);return result.then(callback,function(reason){err("wasm streaming compile failed: "+reason);err("falling back to ArrayBuffer instantiation");return instantiateArrayBuffer(binaryFile,imports,callback)})})}else{return instantiateArrayBuffer(binaryFile,imports,callback)}}function createWasm(){var info={"a":wasmImports};function receiveInstance(instance,module){var exports=instance.exports;Module["asm"]=exports;wasmMemory=Module["asm"]["k"];updateMemoryViews();wasmTable=Module["asm"]["r"];addOnInit(Module["asm"]["l"]);removeRunDependency("wasm-instantiate");return exports}addRunDependency("wasm-instantiate");function receiveInstantiationResult(result){receiveInstance(result["instance"])}if(Module["instantiateWasm"]){try{return Module["instantiateWasm"](info,receiveInstance)}catch(e){err("Module.instantiateWasm callback failed with error: "+e);readyPromiseReject(e)}}instantiateAsync(wasmBinary,wasmBinaryFile,info,receiveInstantiationResult).catch(readyPromiseReject);return{}}var tempDouble;var tempI64;function ExitStatus(status){this.name="ExitStatus";this.message="Program terminated with exit("+status+")";this.status=status}function callRuntimeCallbacks(callbacks){while(callbacks.length>0){callbacks.shift()(Module)}}function getValue(ptr,type="i8"){if(type.endsWith("*"))type="*";switch(type){case"i1":return HEAP8[ptr>>0];case"i8":return HEAP8[ptr>>0];case"i16":return HEAP16[ptr>>1];case"i32":return HEAP32[ptr>>2];case"i64":return HEAP64[ptr>>3];case"float":return HEAPF32[ptr>>2];case"double":return HEAPF64[ptr>>3];case"*":return HEAPU32[ptr>>2];default:abort("invalid type for getValue: "+type)}}function setValue(ptr,value,type="i8"){if(type.endsWith("*"))type="*";switch(type){case"i1":HEAP8[ptr>>0]=value;break;case"i8":HEAP8[ptr>>0]=value;break;case"i16":HEAP16[ptr>>1]=value;break;case"i32":HEAP32[ptr>>2]=value;break;case"i64":tempI64=[value>>>0,(tempDouble=value,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[ptr>>2]=tempI64[0],HEAP32[ptr+4>>2]=tempI64[1];break;case"float":HEAPF32[ptr>>2]=value;break;case"double":HEAPF64[ptr>>3]=value;break;case"*":HEAPU32[ptr>>2]=value;break;default:abort("invalid type for setValue: "+type)}}function _abort(){abort("")}function _emscripten_memcpy_big(dest,src,num){HEAPU8.copyWithin(dest,src,src+num)}function getHeapMax(){return 2147483648}function emscripten_realloc_buffer(size){var b=wasmMemory.buffer;try{wasmMemory.grow(size-b.byteLength+65535>>>16);updateMemoryViews();return 1}catch(e){}}function _emscripten_resize_heap(requestedSize){var oldSize=HEAPU8.length;requestedSize=requestedSize>>>0;var maxHeapSize=getHeapMax();if(requestedSize>maxHeapSize){return false}let alignUp=(x,multiple)=>x+(multiple-x%multiple)%multiple;for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignUp(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=emscripten_realloc_buffer(newSize);if(replacement){return true}}return false}var ENV={};function getExecutableName(){return thisProgram||"./this.program"}function getEnvStrings(){if(!getEnvStrings.strings){var lang=(typeof navigator=="object"&&navigator.languages&&navigator.languages[0]||"C").replace("-","_")+".UTF-8";var env={"USER":"web_user","LOGNAME":"web_user","PATH":"/","PWD":"/","HOME":"/home/web_user","LANG":lang,"_":getExecutableName()};for(var x in ENV){if(ENV[x]===undefined)delete env[x];else env[x]=ENV[x]}var strings=[];for(var x in env){strings.push(x+"="+env[x])}getEnvStrings.strings=strings}return getEnvStrings.strings}function stringToAscii(str,buffer){for(var i=0;i<str.length;++i){HEAP8[buffer++>>0]=str.charCodeAt(i)}HEAP8[buffer>>0]=0}var PATH={isAbs:path=>path.charAt(0)==="/",splitPath:filename=>{var splitPathRe=/^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;return splitPathRe.exec(filename).slice(1)},normalizeArray:(parts,allowAboveRoot)=>{var up=0;for(var i=parts.length-1;i>=0;i--){var last=parts[i];if(last==="."){parts.splice(i,1)}else if(last===".."){parts.splice(i,1);up++}else if(up){parts.splice(i,1);up--}}if(allowAboveRoot){for(;up;up--){parts.unshift("..")}}return parts},normalize:path=>{var isAbsolute=PATH.isAbs(path),trailingSlash=path.substr(-1)==="/";path=PATH.normalizeArray(path.split("/").filter(p=>!!p),!isAbsolute).join("/");if(!path&&!isAbsolute){path="."}if(path&&trailingSlash){path+="/"}return(isAbsolute?"/":"")+path},dirname:path=>{var result=PATH.splitPath(path),root=result[0],dir=result[1];if(!root&&!dir){return"."}if(dir){dir=dir.substr(0,dir.length-1)}return root+dir},basename:path=>{if(path==="/")return"/";path=PATH.normalize(path);path=path.replace(/\/$/,"");var lastSlash=path.lastIndexOf("/");if(lastSlash===-1)return path;return path.substr(lastSlash+1)},join:function(){var paths=Array.prototype.slice.call(arguments);return PATH.normalize(paths.join("/"))},join2:(l,r)=>{return PATH.normalize(l+"/"+r)}};function initRandomFill(){if(typeof crypto=="object"&&typeof crypto["getRandomValues"]=="function"){return view=>crypto.getRandomValues(view)}else if(ENVIRONMENT_IS_NODE){try{var crypto_module=require("crypto");var randomFillSync=crypto_module["randomFillSync"];if(randomFillSync){return view=>crypto_module["randomFillSync"](view)}var randomBytes=crypto_module["randomBytes"];return view=>(view.set(randomBytes(view.byteLength)),view)}catch(e){}}abort("initRandomDevice")}function randomFill(view){return(randomFill=initRandomFill())(view)}var PATH_FS={resolve:function(){var resolvedPath="",resolvedAbsolute=false;for(var i=arguments.length-1;i>=-1&&!resolvedAbsolute;i--){var path=i>=0?arguments[i]:FS.cwd();if(typeof path!="string"){throw new TypeError("Arguments to path.resolve must be strings")}else if(!path){return""}resolvedPath=path+"/"+resolvedPath;resolvedAbsolute=PATH.isAbs(path)}resolvedPath=PATH.normalizeArray(resolvedPath.split("/").filter(p=>!!p),!resolvedAbsolute).join("/");return(resolvedAbsolute?"/":"")+resolvedPath||"."},relative:(from,to)=>{from=PATH_FS.resolve(from).substr(1);to=PATH_FS.resolve(to).substr(1);function trim(arr){var start=0;for(;start<arr.length;start++){if(arr[start]!=="")break}var end=arr.length-1;for(;end>=0;end--){if(arr[end]!=="")break}if(start>end)return[];return arr.slice(start,end-start+1)}var fromParts=trim(from.split("/"));var toParts=trim(to.split("/"));var length=Math.min(fromParts.length,toParts.length);var samePartsLength=length;for(var i=0;i<length;i++){if(fromParts[i]!==toParts[i]){samePartsLength=i;break}}var outputParts=[];for(var i=samePartsLength;i<fromParts.length;i++){outputParts.push("..")}outputParts=outputParts.concat(toParts.slice(samePartsLength));return outputParts.join("/")}};function lengthBytesUTF8(str){var len=0;for(var i=0;i<str.length;++i){var c=str.charCodeAt(i);if(c<=127){len++}else if(c<=2047){len+=2}else if(c>=55296&&c<=57343){len+=4;++i}else{len+=3}}return len}function stringToUTF8Array(str,heap,outIdx,maxBytesToWrite){if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343){var u1=str.charCodeAt(++i);u=65536+((u&1023)<<10)|u1&1023}if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}}heap[outIdx]=0;return outIdx-startIdx}function intArrayFromString(stringy,dontAddNull,length){var len=length>0?length:lengthBytesUTF8(stringy)+1;var u8array=new Array(len);var numBytesWritten=stringToUTF8Array(stringy,u8array,0,u8array.length);if(dontAddNull)u8array.length=numBytesWritten;return u8array}var TTY={ttys:[],init:function(){},shutdown:function(){},register:function(dev,ops){TTY.ttys[dev]={input:[],output:[],ops:ops};FS.registerDevice(dev,TTY.stream_ops)},stream_ops:{open:function(stream){var tty=TTY.ttys[stream.node.rdev];if(!tty){throw new FS.ErrnoError(43)}stream.tty=tty;stream.seekable=false},close:function(stream){stream.tty.ops.fsync(stream.tty)},fsync:function(stream){stream.tty.ops.fsync(stream.tty)},read:function(stream,buffer,offset,length,pos){if(!stream.tty||!stream.tty.ops.get_char){throw new FS.ErrnoError(60)}var bytesRead=0;for(var i=0;i<length;i++){var result;try{result=stream.tty.ops.get_char(stream.tty)}catch(e){throw new FS.ErrnoError(29)}if(result===undefined&&bytesRead===0){throw new FS.ErrnoError(6)}if(result===null||result===undefined)break;bytesRead++;buffer[offset+i]=result}if(bytesRead){stream.node.timestamp=Date.now()}return bytesRead},write:function(stream,buffer,offset,length,pos){if(!stream.tty||!stream.tty.ops.put_char){throw new FS.ErrnoError(60)}try{for(var i=0;i<length;i++){stream.tty.ops.put_char(stream.tty,buffer[offset+i])}}catch(e){throw new FS.ErrnoError(29)}if(length){stream.node.timestamp=Date.now()}return i}},default_tty_ops:{get_char:function(tty){if(!tty.input.length){var result=null;if(ENVIRONMENT_IS_NODE){var BUFSIZE=256;var buf=Buffer.alloc(BUFSIZE);var bytesRead=0;try{bytesRead=fs.readSync(process.stdin.fd,buf,0,BUFSIZE,-1)}catch(e){if(e.toString().includes("EOF"))bytesRead=0;else throw e}if(bytesRead>0){result=buf.slice(0,bytesRead).toString("utf-8")}else{result=null}}else if(typeof window!="undefined"&&typeof window.prompt=="function"){result=window.prompt("Input: ");if(result!==null){result+="\n"}}else if(typeof readline=="function"){result=readline();if(result!==null){result+="\n"}}if(!result){return null}tty.input=intArrayFromString(result,true)}return tty.input.shift()},put_char:function(tty,val){if(val===null||val===10){out(UTF8ArrayToString(tty.output,0));tty.output=[]}else{if(val!=0)tty.output.push(val)}},fsync:function(tty){if(tty.output&&tty.output.length>0){out(UTF8ArrayToString(tty.output,0));tty.output=[]}}},default_tty1_ops:{put_char:function(tty,val){if(val===null||val===10){err(UTF8ArrayToString(tty.output,0));tty.output=[]}else{if(val!=0)tty.output.push(val)}},fsync:function(tty){if(tty.output&&tty.output.length>0){err(UTF8ArrayToString(tty.output,0));tty.output=[]}}}};function mmapAlloc(size){abort()}var MEMFS={ops_table:null,mount:function(mount){return MEMFS.createNode(null,"/",16384|511,0)},createNode:function(parent,name,mode,dev){if(FS.isBlkdev(mode)||FS.isFIFO(mode)){throw new FS.ErrnoError(63)}if(!MEMFS.ops_table){MEMFS.ops_table={dir:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr,lookup:MEMFS.node_ops.lookup,mknod:MEMFS.node_ops.mknod,rename:MEMFS.node_ops.rename,unlink:MEMFS.node_ops.unlink,rmdir:MEMFS.node_ops.rmdir,readdir:MEMFS.node_ops.readdir,symlink:MEMFS.node_ops.symlink},stream:{llseek:MEMFS.stream_ops.llseek}},file:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr},stream:{llseek:MEMFS.stream_ops.llseek,read:MEMFS.stream_ops.read,write:MEMFS.stream_ops.write,allocate:MEMFS.stream_ops.allocate,mmap:MEMFS.stream_ops.mmap,msync:MEMFS.stream_ops.msync}},link:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr,readlink:MEMFS.node_ops.readlink},stream:{}},chrdev:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr},stream:FS.chrdev_stream_ops}}}var node=FS.createNode(parent,name,mode,dev);if(FS.isDir(node.mode)){node.node_ops=MEMFS.ops_table.dir.node;node.stream_ops=MEMFS.ops_table.dir.stream;node.contents={}}else if(FS.isFile(node.mode)){node.node_ops=MEMFS.ops_table.file.node;node.stream_ops=MEMFS.ops_table.file.stream;node.usedBytes=0;node.contents=null}else if(FS.isLink(node.mode)){node.node_ops=MEMFS.ops_table.link.node;node.stream_ops=MEMFS.ops_table.link.stream}else if(FS.isChrdev(node.mode)){node.node_ops=MEMFS.ops_table.chrdev.node;node.stream_ops=MEMFS.ops_table.chrdev.stream}node.timestamp=Date.now();if(parent){parent.contents[name]=node;parent.timestamp=node.timestamp}return node},getFileDataAsTypedArray:function(node){if(!node.contents)return new Uint8Array(0);if(node.contents.subarray)return node.contents.subarray(0,node.usedBytes);return new Uint8Array(node.contents)},expandFileStorage:function(node,newCapacity){var prevCapacity=node.contents?node.contents.length:0;if(prevCapacity>=newCapacity)return;var CAPACITY_DOUBLING_MAX=1024*1024;newCapacity=Math.max(newCapacity,prevCapacity*(prevCapacity<CAPACITY_DOUBLING_MAX?2:1.125)>>>0);if(prevCapacity!=0)newCapacity=Math.max(newCapacity,256);var oldContents=node.contents;node.contents=new Uint8Array(newCapacity);if(node.usedBytes>0)node.contents.set(oldContents.subarray(0,node.usedBytes),0)},resizeFileStorage:function(node,newSize){if(node.usedBytes==newSize)return;if(newSize==0){node.contents=null;node.usedBytes=0}else{var oldContents=node.contents;node.contents=new Uint8Array(newSize);if(oldContents){node.contents.set(oldContents.subarray(0,Math.min(newSize,node.usedBytes)))}node.usedBytes=newSize}},node_ops:{getattr:function(node){var attr={};attr.dev=FS.isChrdev(node.mode)?node.id:1;attr.ino=node.id;attr.mode=node.mode;attr.nlink=1;attr.uid=0;attr.gid=0;attr.rdev=node.rdev;if(FS.isDir(node.mode)){attr.size=4096}else if(FS.isFile(node.mode)){attr.size=node.usedBytes}else if(FS.isLink(node.mode)){attr.size=node.link.length}else{attr.size=0}attr.atime=new Date(node.timestamp);attr.mtime=new Date(node.timestamp);attr.ctime=new Date(node.timestamp);attr.blksize=4096;attr.blocks=Math.ceil(attr.size/attr.blksize);return attr},setattr:function(node,attr){if(attr.mode!==undefined){node.mode=attr.mode}if(attr.timestamp!==undefined){node.timestamp=attr.timestamp}if(attr.size!==undefined){MEMFS.resizeFileStorage(node,attr.size)}},lookup:function(parent,name){throw FS.genericErrors[44]},mknod:function(parent,name,mode,dev){return MEMFS.createNode(parent,name,mode,dev)},rename:function(old_node,new_dir,new_name){if(FS.isDir(old_node.mode)){var new_node;try{new_node=FS.lookupNode(new_dir,new_name)}catch(e){}if(new_node){for(var i in new_node.contents){throw new FS.ErrnoError(55)}}}delete old_node.parent.contents[old_node.name];old_node.parent.timestamp=Date.now();old_node.name=new_name;new_dir.contents[new_name]=old_node;new_dir.timestamp=old_node.parent.timestamp;old_node.parent=new_dir},unlink:function(parent,name){delete parent.contents[name];parent.timestamp=Date.now()},rmdir:function(parent,name){var node=FS.lookupNode(parent,name);for(var i in node.contents){throw new FS.ErrnoError(55)}delete parent.contents[name];parent.timestamp=Date.now()},readdir:function(node){var entries=[".",".."];for(var key in node.contents){if(!node.contents.hasOwnProperty(key)){continue}entries.push(key)}return entries},symlink:function(parent,newname,oldpath){var node=MEMFS.createNode(parent,newname,511|40960,0);node.link=oldpath;return node},readlink:function(node){if(!FS.isLink(node.mode)){throw new FS.ErrnoError(28)}return node.link}},stream_ops:{read:function(stream,buffer,offset,length,position){var contents=stream.node.contents;if(position>=stream.node.usedBytes)return 0;var size=Math.min(stream.node.usedBytes-position,length);if(size>8&&contents.subarray){buffer.set(contents.subarray(position,position+size),offset)}else{for(var i=0;i<size;i++)buffer[offset+i]=contents[position+i]}return size},write:function(stream,buffer,offset,length,position,canOwn){if(buffer.buffer===HEAP8.buffer){canOwn=false}if(!length)return 0;var node=stream.node;node.timestamp=Date.now();if(buffer.subarray&&(!node.contents||node.contents.subarray)){if(canOwn){node.contents=buffer.subarray(offset,offset+length);node.usedBytes=length;return length}else if(node.usedBytes===0&&position===0){node.contents=buffer.slice(offset,offset+length);node.usedBytes=length;return length}else if(position+length<=node.usedBytes){node.contents.set(buffer.subarray(offset,offset+length),position);return length}}MEMFS.expandFileStorage(node,position+length);if(node.contents.subarray&&buffer.subarray){node.contents.set(buffer.subarray(offset,offset+length),position)}else{for(var i=0;i<length;i++){node.contents[position+i]=buffer[offset+i]}}node.usedBytes=Math.max(node.usedBytes,position+length);return length},llseek:function(stream,offset,whence){var position=offset;if(whence===1){position+=stream.position}else if(whence===2){if(FS.isFile(stream.node.mode)){position+=stream.node.usedBytes}}if(position<0){throw new FS.ErrnoError(28)}return position},allocate:function(stream,offset,length){MEMFS.expandFileStorage(stream.node,offset+length);stream.node.usedBytes=Math.max(stream.node.usedBytes,offset+length)},mmap:function(stream,length,position,prot,flags){if(!FS.isFile(stream.node.mode)){throw new FS.ErrnoError(43)}var ptr;var allocated;var contents=stream.node.contents;if(!(flags&2)&&contents.buffer===HEAP8.buffer){allocated=false;ptr=contents.byteOffset}else{if(position>0||position+length<contents.length){if(contents.subarray){contents=contents.subarray(position,position+length)}else{contents=Array.prototype.slice.call(contents,position,position+length)}}allocated=true;ptr=mmapAlloc(length);if(!ptr){throw new FS.ErrnoError(48)}HEAP8.set(contents,ptr)}return{ptr:ptr,allocated:allocated}},msync:function(stream,buffer,offset,length,mmapFlags){MEMFS.stream_ops.write(stream,buffer,0,length,offset,false);return 0}}};function asyncLoad(url,onload,onerror,noRunDep){var dep=!noRunDep?getUniqueRunDependency("al "+url):"";readAsync(url,arrayBuffer=>{assert(arrayBuffer,'Loading data file "'+url+'" failed (no arrayBuffer).');onload(new Uint8Array(arrayBuffer));if(dep)removeRunDependency(dep)},event=>{if(onerror){onerror()}else{throw'Loading data file "'+url+'" failed.'}});if(dep)addRunDependency(dep)}var FS={root:null,mounts:[],devices:{},streams:[],nextInode:1,nameTable:null,currentPath:"/",initialized:false,ignorePermissions:true,ErrnoError:null,genericErrors:{},filesystems:null,syncFSRequests:0,lookupPath:(path,opts={})=>{path=PATH_FS.resolve(path);if(!path)return{path:"",node:null};var defaults={follow_mount:true,recurse_count:0};opts=Object.assign(defaults,opts);if(opts.recurse_count>8){throw new FS.ErrnoError(32)}var parts=path.split("/").filter(p=>!!p);var current=FS.root;var current_path="/";for(var i=0;i<parts.length;i++){var islast=i===parts.length-1;if(islast&&opts.parent){break}current=FS.lookupNode(current,parts[i]);current_path=PATH.join2(current_path,parts[i]);if(FS.isMountpoint(current)){if(!islast||islast&&opts.follow_mount){current=current.mounted.root}}if(!islast||opts.follow){var count=0;while(FS.isLink(current.mode)){var link=FS.readlink(current_path);current_path=PATH_FS.resolve(PATH.dirname(current_path),link);var lookup=FS.lookupPath(current_path,{recurse_count:opts.recurse_count+1});current=lookup.node;if(count++>40){throw new FS.ErrnoError(32)}}}}return{path:current_path,node:current}},getPath:node=>{var path;while(true){if(FS.isRoot(node)){var mount=node.mount.mountpoint;if(!path)return mount;return mount[mount.length-1]!=="/"?mount+"/"+path:mount+path}path=path?node.name+"/"+path:node.name;node=node.parent}},hashName:(parentid,name)=>{var hash=0;for(var i=0;i<name.length;i++){hash=(hash<<5)-hash+name.charCodeAt(i)|0}return(parentid+hash>>>0)%FS.nameTable.length},hashAddNode:node=>{var hash=FS.hashName(node.parent.id,node.name);node.name_next=FS.nameTable[hash];FS.nameTable[hash]=node},hashRemoveNode:node=>{var hash=FS.hashName(node.parent.id,node.name);if(FS.nameTable[hash]===node){FS.nameTable[hash]=node.name_next}else{var current=FS.nameTable[hash];while(current){if(current.name_next===node){current.name_next=node.name_next;break}current=current.name_next}}},lookupNode:(parent,name)=>{var errCode=FS.mayLookup(parent);if(errCode){throw new FS.ErrnoError(errCode,parent)}var hash=FS.hashName(parent.id,name);for(var node=FS.nameTable[hash];node;node=node.name_next){var nodeName=node.name;if(node.parent.id===parent.id&&nodeName===name){return node}}return FS.lookup(parent,name)},createNode:(parent,name,mode,rdev)=>{var node=new FS.FSNode(parent,name,mode,rdev);FS.hashAddNode(node);return node},destroyNode:node=>{FS.hashRemoveNode(node)},isRoot:node=>{return node===node.parent},isMountpoint:node=>{return!!node.mounted},isFile:mode=>{return(mode&61440)===32768},isDir:mode=>{return(mode&61440)===16384},isLink:mode=>{return(mode&61440)===40960},isChrdev:mode=>{return(mode&61440)===8192},isBlkdev:mode=>{return(mode&61440)===24576},isFIFO:mode=>{return(mode&61440)===4096},isSocket:mode=>{return(mode&49152)===49152},flagModes:{"r":0,"r+":2,"w":577,"w+":578,"a":1089,"a+":1090},modeStringToFlags:str=>{var flags=FS.flagModes[str];if(typeof flags=="undefined"){throw new Error("Unknown file open mode: "+str)}return flags},flagsToPermissionString:flag=>{var perms=["r","w","rw"][flag&3];if(flag&512){perms+="w"}return perms},nodePermissions:(node,perms)=>{if(FS.ignorePermissions){return 0}if(perms.includes("r")&&!(node.mode&292)){return 2}else if(perms.includes("w")&&!(node.mode&146)){return 2}else if(perms.includes("x")&&!(node.mode&73)){return 2}return 0},mayLookup:dir=>{var errCode=FS.nodePermissions(dir,"x");if(errCode)return errCode;if(!dir.node_ops.lookup)return 2;return 0},mayCreate:(dir,name)=>{try{var node=FS.lookupNode(dir,name);return 20}catch(e){}return FS.nodePermissions(dir,"wx")},mayDelete:(dir,name,isdir)=>{var node;try{node=FS.lookupNode(dir,name)}catch(e){return e.errno}var errCode=FS.nodePermissions(dir,"wx");if(errCode){return errCode}if(isdir){if(!FS.isDir(node.mode)){return 54}if(FS.isRoot(node)||FS.getPath(node)===FS.cwd()){return 10}}else{if(FS.isDir(node.mode)){return 31}}return 0},mayOpen:(node,flags)=>{if(!node){return 44}if(FS.isLink(node.mode)){return 32}else if(FS.isDir(node.mode)){if(FS.flagsToPermissionString(flags)!=="r"||flags&512){return 31}}return FS.nodePermissions(node,FS.flagsToPermissionString(flags))},MAX_OPEN_FDS:4096,nextfd:(fd_start=0,fd_end=FS.MAX_OPEN_FDS)=>{for(var fd=fd_start;fd<=fd_end;fd++){if(!FS.streams[fd]){return fd}}throw new FS.ErrnoError(33)},getStream:fd=>FS.streams[fd],createStream:(stream,fd_start,fd_end)=>{if(!FS.FSStream){FS.FSStream=function(){this.shared={}};FS.FSStream.prototype={};Object.defineProperties(FS.FSStream.prototype,{object:{get:function(){return this.node},set:function(val){this.node=val}},isRead:{get:function(){return(this.flags&2097155)!==1}},isWrite:{get:function(){return(this.flags&2097155)!==0}},isAppend:{get:function(){return this.flags&1024}},flags:{get:function(){return this.shared.flags},set:function(val){this.shared.flags=val}},position:{get:function(){return this.shared.position},set:function(val){this.shared.position=val}}})}stream=Object.assign(new FS.FSStream,stream);var fd=FS.nextfd(fd_start,fd_end);stream.fd=fd;FS.streams[fd]=stream;return stream},closeStream:fd=>{FS.streams[fd]=null},chrdev_stream_ops:{open:stream=>{var device=FS.getDevice(stream.node.rdev);stream.stream_ops=device.stream_ops;if(stream.stream_ops.open){stream.stream_ops.open(stream)}},llseek:()=>{throw new FS.ErrnoError(70)}},major:dev=>dev>>8,minor:dev=>dev&255,makedev:(ma,mi)=>ma<<8|mi,registerDevice:(dev,ops)=>{FS.devices[dev]={stream_ops:ops}},getDevice:dev=>FS.devices[dev],getMounts:mount=>{var mounts=[];var check=[mount];while(check.length){var m=check.pop();mounts.push(m);check.push.apply(check,m.mounts)}return mounts},syncfs:(populate,callback)=>{if(typeof populate=="function"){callback=populate;populate=false}FS.syncFSRequests++;if(FS.syncFSRequests>1){err("warning: "+FS.syncFSRequests+" FS.syncfs operations in flight at once, probably just doing extra work")}var mounts=FS.getMounts(FS.root.mount);var completed=0;function doCallback(errCode){FS.syncFSRequests--;return callback(errCode)}function done(errCode){if(errCode){if(!done.errored){done.errored=true;return doCallback(errCode)}return}if(++completed>=mounts.length){doCallback(null)}}mounts.forEach(mount=>{if(!mount.type.syncfs){return done(null)}mount.type.syncfs(mount,populate,done)})},mount:(type,opts,mountpoint)=>{var root=mountpoint==="/";var pseudo=!mountpoint;var node;if(root&&FS.root){throw new FS.ErrnoError(10)}else if(!root&&!pseudo){var lookup=FS.lookupPath(mountpoint,{follow_mount:false});mountpoint=lookup.path;node=lookup.node;if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}if(!FS.isDir(node.mode)){throw new FS.ErrnoError(54)}}var mount={type:type,opts:opts,mountpoint:mountpoint,mounts:[]};var mountRoot=type.mount(mount);mountRoot.mount=mount;mount.root=mountRoot;if(root){FS.root=mountRoot}else if(node){node.mounted=mount;if(node.mount){node.mount.mounts.push(mount)}}return mountRoot},unmount:mountpoint=>{var lookup=FS.lookupPath(mountpoint,{follow_mount:false});if(!FS.isMountpoint(lookup.node)){throw new FS.ErrnoError(28)}var node=lookup.node;var mount=node.mounted;var mounts=FS.getMounts(mount);Object.keys(FS.nameTable).forEach(hash=>{var current=FS.nameTable[hash];while(current){var next=current.name_next;if(mounts.includes(current.mount)){FS.destroyNode(current)}current=next}});node.mounted=null;var idx=node.mount.mounts.indexOf(mount);node.mount.mounts.splice(idx,1)},lookup:(parent,name)=>{return parent.node_ops.lookup(parent,name)},mknod:(path,mode,dev)=>{var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;var name=PATH.basename(path);if(!name||name==="."||name===".."){throw new FS.ErrnoError(28)}var errCode=FS.mayCreate(parent,name);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.mknod){throw new FS.ErrnoError(63)}return parent.node_ops.mknod(parent,name,mode,dev)},create:(path,mode)=>{mode=mode!==undefined?mode:438;mode&=4095;mode|=32768;return FS.mknod(path,mode,0)},mkdir:(path,mode)=>{mode=mode!==undefined?mode:511;mode&=511|512;mode|=16384;return FS.mknod(path,mode,0)},mkdirTree:(path,mode)=>{var dirs=path.split("/");var d="";for(var i=0;i<dirs.length;++i){if(!dirs[i])continue;d+="/"+dirs[i];try{FS.mkdir(d,mode)}catch(e){if(e.errno!=20)throw e}}},mkdev:(path,mode,dev)=>{if(typeof dev=="undefined"){dev=mode;mode=438}mode|=8192;return FS.mknod(path,mode,dev)},symlink:(oldpath,newpath)=>{if(!PATH_FS.resolve(oldpath)){throw new FS.ErrnoError(44)}var lookup=FS.lookupPath(newpath,{parent:true});var parent=lookup.node;if(!parent){throw new FS.ErrnoError(44)}var newname=PATH.basename(newpath);var errCode=FS.mayCreate(parent,newname);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.symlink){throw new FS.ErrnoError(63)}return parent.node_ops.symlink(parent,newname,oldpath)},rename:(old_path,new_path)=>{var old_dirname=PATH.dirname(old_path);var new_dirname=PATH.dirname(new_path);var old_name=PATH.basename(old_path);var new_name=PATH.basename(new_path);var lookup,old_dir,new_dir;lookup=FS.lookupPath(old_path,{parent:true});old_dir=lookup.node;lookup=FS.lookupPath(new_path,{parent:true});new_dir=lookup.node;if(!old_dir||!new_dir)throw new FS.ErrnoError(44);if(old_dir.mount!==new_dir.mount){throw new FS.ErrnoError(75)}var old_node=FS.lookupNode(old_dir,old_name);var relative=PATH_FS.relative(old_path,new_dirname);if(relative.charAt(0)!=="."){throw new FS.ErrnoError(28)}relative=PATH_FS.relative(new_path,old_dirname);if(relative.charAt(0)!=="."){throw new FS.ErrnoError(55)}var new_node;try{new_node=FS.lookupNode(new_dir,new_name)}catch(e){}if(old_node===new_node){return}var isdir=FS.isDir(old_node.mode);var errCode=FS.mayDelete(old_dir,old_name,isdir);if(errCode){throw new FS.ErrnoError(errCode)}errCode=new_node?FS.mayDelete(new_dir,new_name,isdir):FS.mayCreate(new_dir,new_name);if(errCode){throw new FS.ErrnoError(errCode)}if(!old_dir.node_ops.rename){throw new FS.ErrnoError(63)}if(FS.isMountpoint(old_node)||new_node&&FS.isMountpoint(new_node)){throw new FS.ErrnoError(10)}if(new_dir!==old_dir){errCode=FS.nodePermissions(old_dir,"w");if(errCode){throw new FS.ErrnoError(errCode)}}FS.hashRemoveNode(old_node);try{old_dir.node_ops.rename(old_node,new_dir,new_name)}catch(e){throw e}finally{FS.hashAddNode(old_node)}},rmdir:path=>{var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;var name=PATH.basename(path);var node=FS.lookupNode(parent,name);var errCode=FS.mayDelete(parent,name,true);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.rmdir){throw new FS.ErrnoError(63)}if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}parent.node_ops.rmdir(parent,name);FS.destroyNode(node)},readdir:path=>{var lookup=FS.lookupPath(path,{follow:true});var node=lookup.node;if(!node.node_ops.readdir){throw new FS.ErrnoError(54)}return node.node_ops.readdir(node)},unlink:path=>{var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;if(!parent){throw new FS.ErrnoError(44)}var name=PATH.basename(path);var node=FS.lookupNode(parent,name);var errCode=FS.mayDelete(parent,name,false);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.unlink){throw new FS.ErrnoError(63)}if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}parent.node_ops.unlink(parent,name);FS.destroyNode(node)},readlink:path=>{var lookup=FS.lookupPath(path);var link=lookup.node;if(!link){throw new FS.ErrnoError(44)}if(!link.node_ops.readlink){throw new FS.ErrnoError(28)}return PATH_FS.resolve(FS.getPath(link.parent),link.node_ops.readlink(link))},stat:(path,dontFollow)=>{var lookup=FS.lookupPath(path,{follow:!dontFollow});var node=lookup.node;if(!node){throw new FS.ErrnoError(44)}if(!node.node_ops.getattr){throw new FS.ErrnoError(63)}return node.node_ops.getattr(node)},lstat:path=>{return FS.stat(path,true)},chmod:(path,mode,dontFollow)=>{var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:!dontFollow});node=lookup.node}else{node=path}if(!node.node_ops.setattr){throw new FS.ErrnoError(63)}node.node_ops.setattr(node,{mode:mode&4095|node.mode&~4095,timestamp:Date.now()})},lchmod:(path,mode)=>{FS.chmod(path,mode,true)},fchmod:(fd,mode)=>{var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}FS.chmod(stream.node,mode)},chown:(path,uid,gid,dontFollow)=>{var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:!dontFollow});node=lookup.node}else{node=path}if(!node.node_ops.setattr){throw new FS.ErrnoError(63)}node.node_ops.setattr(node,{timestamp:Date.now()})},lchown:(path,uid,gid)=>{FS.chown(path,uid,gid,true)},fchown:(fd,uid,gid)=>{var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}FS.chown(stream.node,uid,gid)},truncate:(path,len)=>{if(len<0){throw new FS.ErrnoError(28)}var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:true});node=lookup.node}else{node=path}if(!node.node_ops.setattr){throw new FS.ErrnoError(63)}if(FS.isDir(node.mode)){throw new FS.ErrnoError(31)}if(!FS.isFile(node.mode)){throw new FS.ErrnoError(28)}var errCode=FS.nodePermissions(node,"w");if(errCode){throw new FS.ErrnoError(errCode)}node.node_ops.setattr(node,{size:len,timestamp:Date.now()})},ftruncate:(fd,len)=>{var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(28)}FS.truncate(stream.node,len)},utime:(path,atime,mtime)=>{var lookup=FS.lookupPath(path,{follow:true});var node=lookup.node;node.node_ops.setattr(node,{timestamp:Math.max(atime,mtime)})},open:(path,flags,mode)=>{if(path===""){throw new FS.ErrnoError(44)}flags=typeof flags=="string"?FS.modeStringToFlags(flags):flags;mode=typeof mode=="undefined"?438:mode;if(flags&64){mode=mode&4095|32768}else{mode=0}var node;if(typeof path=="object"){node=path}else{path=PATH.normalize(path);try{var lookup=FS.lookupPath(path,{follow:!(flags&131072)});node=lookup.node}catch(e){}}var created=false;if(flags&64){if(node){if(flags&128){throw new FS.ErrnoError(20)}}else{node=FS.mknod(path,mode,0);created=true}}if(!node){throw new FS.ErrnoError(44)}if(FS.isChrdev(node.mode)){flags&=~512}if(flags&65536&&!FS.isDir(node.mode)){throw new FS.ErrnoError(54)}if(!created){var errCode=FS.mayOpen(node,flags);if(errCode){throw new FS.ErrnoError(errCode)}}if(flags&512&&!created){FS.truncate(node,0)}flags&=~(128|512|131072);var stream=FS.createStream({node:node,path:FS.getPath(node),flags:flags,seekable:true,position:0,stream_ops:node.stream_ops,ungotten:[],error:false});if(stream.stream_ops.open){stream.stream_ops.open(stream)}if(Module["logReadFiles"]&&!(flags&1)){if(!FS.readFiles)FS.readFiles={};if(!(path in FS.readFiles)){FS.readFiles[path]=1}}return stream},close:stream=>{if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(stream.getdents)stream.getdents=null;try{if(stream.stream_ops.close){stream.stream_ops.close(stream)}}catch(e){throw e}finally{FS.closeStream(stream.fd)}stream.fd=null},isClosed:stream=>{return stream.fd===null},llseek:(stream,offset,whence)=>{if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(!stream.seekable||!stream.stream_ops.llseek){throw new FS.ErrnoError(70)}if(whence!=0&&whence!=1&&whence!=2){throw new FS.ErrnoError(28)}stream.position=stream.stream_ops.llseek(stream,offset,whence);stream.ungotten=[];return stream.position},read:(stream,buffer,offset,length,position)=>{if(length<0||position<0){throw new FS.ErrnoError(28)}if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===1){throw new FS.ErrnoError(8)}if(FS.isDir(stream.node.mode)){throw new FS.ErrnoError(31)}if(!stream.stream_ops.read){throw new FS.ErrnoError(28)}var seeking=typeof position!="undefined";if(!seeking){position=stream.position}else if(!stream.seekable){throw new FS.ErrnoError(70)}var bytesRead=stream.stream_ops.read(stream,buffer,offset,length,position);if(!seeking)stream.position+=bytesRead;return bytesRead},write:(stream,buffer,offset,length,position,canOwn)=>{if(length<0||position<0){throw new FS.ErrnoError(28)}if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(8)}if(FS.isDir(stream.node.mode)){throw new FS.ErrnoError(31)}if(!stream.stream_ops.write){throw new FS.ErrnoError(28)}if(stream.seekable&&stream.flags&1024){FS.llseek(stream,0,2)}var seeking=typeof position!="undefined";if(!seeking){position=stream.position}else if(!stream.seekable){throw new FS.ErrnoError(70)}var bytesWritten=stream.stream_ops.write(stream,buffer,offset,length,position,canOwn);if(!seeking)stream.position+=bytesWritten;return bytesWritten},allocate:(stream,offset,length)=>{if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(offset<0||length<=0){throw new FS.ErrnoError(28)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(8)}if(!FS.isFile(stream.node.mode)&&!FS.isDir(stream.node.mode)){throw new FS.ErrnoError(43)}if(!stream.stream_ops.allocate){throw new FS.ErrnoError(138)}stream.stream_ops.allocate(stream,offset,length)},mmap:(stream,length,position,prot,flags)=>{if((prot&2)!==0&&(flags&2)===0&&(stream.flags&2097155)!==2){throw new FS.ErrnoError(2)}if((stream.flags&2097155)===1){throw new FS.ErrnoError(2)}if(!stream.stream_ops.mmap){throw new FS.ErrnoError(43)}return stream.stream_ops.mmap(stream,length,position,prot,flags)},msync:(stream,buffer,offset,length,mmapFlags)=>{if(!stream.stream_ops.msync){return 0}return stream.stream_ops.msync(stream,buffer,offset,length,mmapFlags)},munmap:stream=>0,ioctl:(stream,cmd,arg)=>{if(!stream.stream_ops.ioctl){throw new FS.ErrnoError(59)}return stream.stream_ops.ioctl(stream,cmd,arg)},readFile:(path,opts={})=>{opts.flags=opts.flags||0;opts.encoding=opts.encoding||"binary";if(opts.encoding!=="utf8"&&opts.encoding!=="binary"){throw new Error('Invalid encoding type "'+opts.encoding+'"')}var ret;var stream=FS.open(path,opts.flags);var stat=FS.stat(path);var length=stat.size;var buf=new Uint8Array(length);FS.read(stream,buf,0,length,0);if(opts.encoding==="utf8"){ret=UTF8ArrayToString(buf,0)}else if(opts.encoding==="binary"){ret=buf}FS.close(stream);return ret},writeFile:(path,data,opts={})=>{opts.flags=opts.flags||577;var stream=FS.open(path,opts.flags,opts.mode);if(typeof data=="string"){var buf=new Uint8Array(lengthBytesUTF8(data)+1);var actualNumBytes=stringToUTF8Array(data,buf,0,buf.length);FS.write(stream,buf,0,actualNumBytes,undefined,opts.canOwn)}else if(ArrayBuffer.isView(data)){FS.write(stream,data,0,data.byteLength,undefined,opts.canOwn)}else{throw new Error("Unsupported data type")}FS.close(stream)},cwd:()=>FS.currentPath,chdir:path=>{var lookup=FS.lookupPath(path,{follow:true});if(lookup.node===null){throw new FS.ErrnoError(44)}if(!FS.isDir(lookup.node.mode)){throw new FS.ErrnoError(54)}var errCode=FS.nodePermissions(lookup.node,"x");if(errCode){throw new FS.ErrnoError(errCode)}FS.currentPath=lookup.path},createDefaultDirectories:()=>{FS.mkdir("/tmp");FS.mkdir("/home");FS.mkdir("/home/web_user")},createDefaultDevices:()=>{FS.mkdir("/dev");FS.registerDevice(FS.makedev(1,3),{read:()=>0,write:(stream,buffer,offset,length,pos)=>length});FS.mkdev("/dev/null",FS.makedev(1,3));TTY.register(FS.makedev(5,0),TTY.default_tty_ops);TTY.register(FS.makedev(6,0),TTY.default_tty1_ops);FS.mkdev("/dev/tty",FS.makedev(5,0));FS.mkdev("/dev/tty1",FS.makedev(6,0));var randomBuffer=new Uint8Array(1024),randomLeft=0;var randomByte=()=>{if(randomLeft===0){randomLeft=randomFill(randomBuffer).byteLength}return randomBuffer[--randomLeft]};FS.createDevice("/dev","random",randomByte);FS.createDevice("/dev","urandom",randomByte);FS.mkdir("/dev/shm");FS.mkdir("/dev/shm/tmp")},createSpecialDirectories:()=>{FS.mkdir("/proc");var proc_self=FS.mkdir("/proc/self");FS.mkdir("/proc/self/fd");FS.mount({mount:()=>{var node=FS.createNode(proc_self,"fd",16384|511,73);node.node_ops={lookup:(parent,name)=>{var fd=+name;var stream=FS.getStream(fd);if(!stream)throw new FS.ErrnoError(8);var ret={parent:null,mount:{mountpoint:"fake"},node_ops:{readlink:()=>stream.path}};ret.parent=ret;return ret}};return node}},{},"/proc/self/fd")},createStandardStreams:()=>{if(Module["stdin"]){FS.createDevice("/dev","stdin",Module["stdin"])}else{FS.symlink("/dev/tty","/dev/stdin")}if(Module["stdout"]){FS.createDevice("/dev","stdout",null,Module["stdout"])}else{FS.symlink("/dev/tty","/dev/stdout")}if(Module["stderr"]){FS.createDevice("/dev","stderr",null,Module["stderr"])}else{FS.symlink("/dev/tty1","/dev/stderr")}var stdin=FS.open("/dev/stdin",0);var stdout=FS.open("/dev/stdout",1);var stderr=FS.open("/dev/stderr",1)},ensureErrnoError:()=>{if(FS.ErrnoError)return;FS.ErrnoError=function ErrnoError(errno,node){this.name="ErrnoError";this.node=node;this.setErrno=function(errno){this.errno=errno};this.setErrno(errno);this.message="FS error"};FS.ErrnoError.prototype=new Error;FS.ErrnoError.prototype.constructor=FS.ErrnoError;[44].forEach(code=>{FS.genericErrors[code]=new FS.ErrnoError(code);FS.genericErrors[code].stack="<generic error, no stack>"})},staticInit:()=>{FS.ensureErrnoError();FS.nameTable=new Array(4096);FS.mount(MEMFS,{},"/");FS.createDefaultDirectories();FS.createDefaultDevices();FS.createSpecialDirectories();FS.filesystems={"MEMFS":MEMFS}},init:(input,output,error)=>{FS.init.initialized=true;FS.ensureErrnoError();Module["stdin"]=input||Module["stdin"];Module["stdout"]=output||Module["stdout"];Module["stderr"]=error||Module["stderr"];FS.createStandardStreams()},quit:()=>{FS.init.initialized=false;for(var i=0;i<FS.streams.length;i++){var stream=FS.streams[i];if(!stream){continue}FS.close(stream)}},getMode:(canRead,canWrite)=>{var mode=0;if(canRead)mode|=292|73;if(canWrite)mode|=146;return mode},findObject:(path,dontResolveLastLink)=>{var ret=FS.analyzePath(path,dontResolveLastLink);if(!ret.exists){return null}return ret.object},analyzePath:(path,dontResolveLastLink)=>{try{var lookup=FS.lookupPath(path,{follow:!dontResolveLastLink});path=lookup.path}catch(e){}var ret={isRoot:false,exists:false,error:0,name:null,path:null,object:null,parentExists:false,parentPath:null,parentObject:null};try{var lookup=FS.lookupPath(path,{parent:true});ret.parentExists=true;ret.parentPath=lookup.path;ret.parentObject=lookup.node;ret.name=PATH.basename(path);lookup=FS.lookupPath(path,{follow:!dontResolveLastLink});ret.exists=true;ret.path=lookup.path;ret.object=lookup.node;ret.name=lookup.node.name;ret.isRoot=lookup.path==="/"}catch(e){ret.error=e.errno}return ret},createPath:(parent,path,canRead,canWrite)=>{parent=typeof parent=="string"?parent:FS.getPath(parent);var parts=path.split("/").reverse();while(parts.length){var part=parts.pop();if(!part)continue;var current=PATH.join2(parent,part);try{FS.mkdir(current)}catch(e){}parent=current}return current},createFile:(parent,name,properties,canRead,canWrite)=>{var path=PATH.join2(typeof parent=="string"?parent:FS.getPath(parent),name);var mode=FS.getMode(canRead,canWrite);return FS.create(path,mode)},createDataFile:(parent,name,data,canRead,canWrite,canOwn)=>{var path=name;if(parent){parent=typeof parent=="string"?parent:FS.getPath(parent);path=name?PATH.join2(parent,name):parent}var mode=FS.getMode(canRead,canWrite);var node=FS.create(path,mode);if(data){if(typeof data=="string"){var arr=new Array(data.length);for(var i=0,len=data.length;i<len;++i)arr[i]=data.charCodeAt(i);data=arr}FS.chmod(node,mode|146);var stream=FS.open(node,577);FS.write(stream,data,0,data.length,0,canOwn);FS.close(stream);FS.chmod(node,mode)}return node},createDevice:(parent,name,input,output)=>{var path=PATH.join2(typeof parent=="string"?parent:FS.getPath(parent),name);var mode=FS.getMode(!!input,!!output);if(!FS.createDevice.major)FS.createDevice.major=64;var dev=FS.makedev(FS.createDevice.major++,0);FS.registerDevice(dev,{open:stream=>{stream.seekable=false},close:stream=>{if(output&&output.buffer&&output.buffer.length){output(10)}},read:(stream,buffer,offset,length,pos)=>{var bytesRead=0;for(var i=0;i<length;i++){var result;try{result=input()}catch(e){throw new FS.ErrnoError(29)}if(result===undefined&&bytesRead===0){throw new FS.ErrnoError(6)}if(result===null||result===undefined)break;bytesRead++;buffer[offset+i]=result}if(bytesRead){stream.node.timestamp=Date.now()}return bytesRead},write:(stream,buffer,offset,length,pos)=>{for(var i=0;i<length;i++){try{output(buffer[offset+i])}catch(e){throw new FS.ErrnoError(29)}}if(length){stream.node.timestamp=Date.now()}return i}});return FS.mkdev(path,mode,dev)},forceLoadFile:obj=>{if(obj.isDevice||obj.isFolder||obj.link||obj.contents)return true;if(typeof XMLHttpRequest!="undefined"){throw new Error("Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.")}else if(read_){try{obj.contents=intArrayFromString(read_(obj.url),true);obj.usedBytes=obj.contents.length}catch(e){throw new FS.ErrnoError(29)}}else{throw new Error("Cannot load without read() or XMLHttpRequest.")}},createLazyFile:(parent,name,url,canRead,canWrite)=>{function LazyUint8Array(){this.lengthKnown=false;this.chunks=[]}LazyUint8Array.prototype.get=function LazyUint8Array_get(idx){if(idx>this.length-1||idx<0){return undefined}var chunkOffset=idx%this.chunkSize;var chunkNum=idx/this.chunkSize|0;return this.getter(chunkNum)[chunkOffset]};LazyUint8Array.prototype.setDataGetter=function LazyUint8Array_setDataGetter(getter){this.getter=getter};LazyUint8Array.prototype.cacheLength=function LazyUint8Array_cacheLength(){var xhr=new XMLHttpRequest;xhr.open("HEAD",url,false);xhr.send(null);if(!(xhr.status>=200&&xhr.status<300||xhr.status===304))throw new Error("Couldn't load "+url+". Status: "+xhr.status);var datalength=Number(xhr.getResponseHeader("Content-length"));var header;var hasByteServing=(header=xhr.getResponseHeader("Accept-Ranges"))&&header==="bytes";var usesGzip=(header=xhr.getResponseHeader("Content-Encoding"))&&header==="gzip";var chunkSize=1024*1024;if(!hasByteServing)chunkSize=datalength;var doXHR=(from,to)=>{if(from>to)throw new Error("invalid range ("+from+", "+to+") or no bytes requested!");if(to>datalength-1)throw new Error("only "+datalength+" bytes available! programmer error!");var xhr=new XMLHttpRequest;xhr.open("GET",url,false);if(datalength!==chunkSize)xhr.setRequestHeader("Range","bytes="+from+"-"+to);xhr.responseType="arraybuffer";if(xhr.overrideMimeType){xhr.overrideMimeType("text/plain; charset=x-user-defined")}xhr.send(null);if(!(xhr.status>=200&&xhr.status<300||xhr.status===304))throw new Error("Couldn't load "+url+". Status: "+xhr.status);if(xhr.response!==undefined){return new Uint8Array(xhr.response||[])}return intArrayFromString(xhr.responseText||"",true)};var lazyArray=this;lazyArray.setDataGetter(chunkNum=>{var start=chunkNum*chunkSize;var end=(chunkNum+1)*chunkSize-1;end=Math.min(end,datalength-1);if(typeof lazyArray.chunks[chunkNum]=="undefined"){lazyArray.chunks[chunkNum]=doXHR(start,end)}if(typeof lazyArray.chunks[chunkNum]=="undefined")throw new Error("doXHR failed!");return lazyArray.chunks[chunkNum]});if(usesGzip||!datalength){chunkSize=datalength=1;datalength=this.getter(0).length;chunkSize=datalength;out("LazyFiles on gzip forces download of the whole file when length is accessed")}this._length=datalength;this._chunkSize=chunkSize;this.lengthKnown=true};if(typeof XMLHttpRequest!="undefined"){if(!ENVIRONMENT_IS_WORKER)throw"Cannot do synchronous binary XHRs outside webworkers in modern browsers. Use --embed-file or --preload-file in emcc";var lazyArray=new LazyUint8Array;Object.defineProperties(lazyArray,{length:{get:function(){if(!this.lengthKnown){this.cacheLength()}return this._length}},chunkSize:{get:function(){if(!this.lengthKnown){this.cacheLength()}return this._chunkSize}}});var properties={isDevice:false,contents:lazyArray}}else{var properties={isDevice:false,url:url}}var node=FS.createFile(parent,name,properties,canRead,canWrite);if(properties.contents){node.contents=properties.contents}else if(properties.url){node.contents=null;node.url=properties.url}Object.defineProperties(node,{usedBytes:{get:function(){return this.contents.length}}});var stream_ops={};var keys=Object.keys(node.stream_ops);keys.forEach(key=>{var fn=node.stream_ops[key];stream_ops[key]=function forceLoadLazyFile(){FS.forceLoadFile(node);return fn.apply(null,arguments)}});function writeChunks(stream,buffer,offset,length,position){var contents=stream.node.contents;if(position>=contents.length)return 0;var size=Math.min(contents.length-position,length);if(contents.slice){for(var i=0;i<size;i++){buffer[offset+i]=contents[position+i]}}else{for(var i=0;i<size;i++){buffer[offset+i]=contents.get(position+i)}}return size}stream_ops.read=(stream,buffer,offset,length,position)=>{FS.forceLoadFile(node);return writeChunks(stream,buffer,offset,length,position)};stream_ops.mmap=(stream,length,position,prot,flags)=>{FS.forceLoadFile(node);var ptr=mmapAlloc(length);if(!ptr){throw new FS.ErrnoError(48)}writeChunks(stream,HEAP8,ptr,length,position);return{ptr:ptr,allocated:true}};node.stream_ops=stream_ops;return node},createPreloadedFile:(parent,name,url,canRead,canWrite,onload,onerror,dontCreateFile,canOwn,preFinish)=>{var fullname=name?PATH_FS.resolve(PATH.join2(parent,name)):parent;var dep=getUniqueRunDependency("cp "+fullname);function processData(byteArray){function finish(byteArray){if(preFinish)preFinish();if(!dontCreateFile){FS.createDataFile(parent,name,byteArray,canRead,canWrite,canOwn)}if(onload)onload();removeRunDependency(dep)}if(Browser.handledByPreloadPlugin(byteArray,fullname,finish,()=>{if(onerror)onerror();removeRunDependency(dep)})){return}finish(byteArray)}addRunDependency(dep);if(typeof url=="string"){asyncLoad(url,byteArray=>processData(byteArray),onerror)}else{processData(url)}}};var UTF8Decoder=typeof TextDecoder!="undefined"?new TextDecoder("utf8"):undefined;function UTF8ArrayToString(heapOrArray,idx,maxBytesToRead){var endIdx=idx+maxBytesToRead;var endPtr=idx;while(heapOrArray[endPtr]&&!(endPtr>=endIdx))++endPtr;if(endPtr-idx>16&&heapOrArray.buffer&&UTF8Decoder){return UTF8Decoder.decode(heapOrArray.subarray(idx,endPtr))}var str="";while(idx<endPtr){var u0=heapOrArray[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heapOrArray[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heapOrArray[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2}else{u0=(u0&7)<<18|u1<<12|u2<<6|heapOrArray[idx++]&63}if(u0<65536){str+=String.fromCharCode(u0)}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023)}}return str}function UTF8ToString(ptr,maxBytesToRead){return ptr?UTF8ArrayToString(HEAPU8,ptr,maxBytesToRead):""}var SYSCALLS={DEFAULT_POLLMASK:5,calculateAt:function(dirfd,path,allowEmpty){if(PATH.isAbs(path)){return path}var dir;if(dirfd===-100){dir=FS.cwd()}else{var dirstream=SYSCALLS.getStreamFromFD(dirfd);dir=dirstream.path}if(path.length==0){if(!allowEmpty){throw new FS.ErrnoError(44)}return dir}return PATH.join2(dir,path)},doStat:function(func,path,buf){try{var stat=func(path)}catch(e){if(e&&e.node&&PATH.normalize(path)!==PATH.normalize(FS.getPath(e.node))){return-54}throw e}HEAP32[buf>>2]=stat.dev;HEAP32[buf+8>>2]=stat.ino;HEAP32[buf+12>>2]=stat.mode;HEAPU32[buf+16>>2]=stat.nlink;HEAP32[buf+20>>2]=stat.uid;HEAP32[buf+24>>2]=stat.gid;HEAP32[buf+28>>2]=stat.rdev;tempI64=[stat.size>>>0,(tempDouble=stat.size,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+40>>2]=tempI64[0],HEAP32[buf+44>>2]=tempI64[1];HEAP32[buf+48>>2]=4096;HEAP32[buf+52>>2]=stat.blocks;var atime=stat.atime.getTime();var mtime=stat.mtime.getTime();var ctime=stat.ctime.getTime();tempI64=[Math.floor(atime/1e3)>>>0,(tempDouble=Math.floor(atime/1e3),+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+56>>2]=tempI64[0],HEAP32[buf+60>>2]=tempI64[1];HEAPU32[buf+64>>2]=atime%1e3*1e3;tempI64=[Math.floor(mtime/1e3)>>>0,(tempDouble=Math.floor(mtime/1e3),+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+72>>2]=tempI64[0],HEAP32[buf+76>>2]=tempI64[1];HEAPU32[buf+80>>2]=mtime%1e3*1e3;tempI64=[Math.floor(ctime/1e3)>>>0,(tempDouble=Math.floor(ctime/1e3),+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+88>>2]=tempI64[0],HEAP32[buf+92>>2]=tempI64[1];HEAPU32[buf+96>>2]=ctime%1e3*1e3;tempI64=[stat.ino>>>0,(tempDouble=stat.ino,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[buf+104>>2]=tempI64[0],HEAP32[buf+108>>2]=tempI64[1];return 0},doMsync:function(addr,stream,len,flags,offset){if(!FS.isFile(stream.node.mode)){throw new FS.ErrnoError(43)}if(flags&2){return 0}var buffer=HEAPU8.slice(addr,addr+len);FS.msync(stream,buffer,offset,len,flags)},varargs:undefined,get:function(){SYSCALLS.varargs+=4;var ret=HEAP32[SYSCALLS.varargs-4>>2];return ret},getStr:function(ptr){var ret=UTF8ToString(ptr);return ret},getStreamFromFD:function(fd){var stream=FS.getStream(fd);if(!stream)throw new FS.ErrnoError(8);return stream}};function _environ_get(__environ,environ_buf){var bufSize=0;getEnvStrings().forEach(function(string,i){var ptr=environ_buf+bufSize;HEAPU32[__environ+i*4>>2]=ptr;stringToAscii(string,ptr);bufSize+=string.length+1});return 0}function _environ_sizes_get(penviron_count,penviron_buf_size){var strings=getEnvStrings();HEAPU32[penviron_count>>2]=strings.length;var bufSize=0;strings.forEach(function(string){bufSize+=string.length+1});HEAPU32[penviron_buf_size>>2]=bufSize;return 0}function _fd_close(fd){try{var stream=SYSCALLS.getStreamFromFD(fd);FS.close(stream);return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function doReadv(stream,iov,iovcnt,offset){var ret=0;for(var i=0;i<iovcnt;i++){var ptr=HEAPU32[iov>>2];var len=HEAPU32[iov+4>>2];iov+=8;var curr=FS.read(stream,HEAP8,ptr,len,offset);if(curr<0)return-1;ret+=curr;if(curr<len)break;if(typeof offset!=="undefined"){offset+=curr}}return ret}function _fd_read(fd,iov,iovcnt,pnum){try{var stream=SYSCALLS.getStreamFromFD(fd);var num=doReadv(stream,iov,iovcnt);HEAPU32[pnum>>2]=num;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}var MAX_INT53=9007199254740992;var MIN_INT53=-9007199254740992;function bigintToI53Checked(num){return num<MIN_INT53||num>MAX_INT53?NaN:Number(num)}function _fd_seek(fd,offset,whence,newOffset){try{offset=bigintToI53Checked(offset);if(isNaN(offset))return 61;var stream=SYSCALLS.getStreamFromFD(fd);FS.llseek(stream,offset,whence);tempI64=[stream.position>>>0,(tempDouble=stream.position,+Math.abs(tempDouble)>=1?tempDouble>0?(Math.min(+Math.floor(tempDouble/4294967296),4294967295)|0)>>>0:~~+Math.ceil((tempDouble-+(~~tempDouble>>>0))/4294967296)>>>0:0)],HEAP32[newOffset>>2]=tempI64[0],HEAP32[newOffset+4>>2]=tempI64[1];if(stream.getdents&&offset===0&&whence===0)stream.getdents=null;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function doWritev(stream,iov,iovcnt,offset){var ret=0;for(var i=0;i<iovcnt;i++){var ptr=HEAPU32[iov>>2];var len=HEAPU32[iov+4>>2];iov+=8;var curr=FS.write(stream,HEAP8,ptr,len,offset);if(curr<0)return-1;ret+=curr;if(typeof offset!=="undefined"){offset+=curr}}return ret}function _fd_write(fd,iov,iovcnt,pnum){try{var stream=SYSCALLS.getStreamFromFD(fd);var num=doWritev(stream,iov,iovcnt);HEAPU32[pnum>>2]=num;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function isLeapYear(year){return year%4===0&&(year%100!==0||year%400===0)}function arraySum(array,index){var sum=0;for(var i=0;i<=index;sum+=array[i++]){}return sum}var MONTH_DAYS_LEAP=[31,29,31,30,31,30,31,31,30,31,30,31];var MONTH_DAYS_REGULAR=[31,28,31,30,31,30,31,31,30,31,30,31];function addDays(date,days){var newDate=new Date(date.getTime());while(days>0){var leap=isLeapYear(newDate.getFullYear());var currentMonth=newDate.getMonth();var daysInCurrentMonth=(leap?MONTH_DAYS_LEAP:MONTH_DAYS_REGULAR)[currentMonth];if(days>daysInCurrentMonth-newDate.getDate()){days-=daysInCurrentMonth-newDate.getDate()+1;newDate.setDate(1);if(currentMonth<11){newDate.setMonth(currentMonth+1)}else{newDate.setMonth(0);newDate.setFullYear(newDate.getFullYear()+1)}}else{newDate.setDate(newDate.getDate()+days);return newDate}}return newDate}function writeArrayToMemory(array,buffer){HEAP8.set(array,buffer)}function _strftime(s,maxsize,format,tm){var tm_zone=HEAP32[tm+40>>2];var date={tm_sec:HEAP32[tm>>2],tm_min:HEAP32[tm+4>>2],tm_hour:HEAP32[tm+8>>2],tm_mday:HEAP32[tm+12>>2],tm_mon:HEAP32[tm+16>>2],tm_year:HEAP32[tm+20>>2],tm_wday:HEAP32[tm+24>>2],tm_yday:HEAP32[tm+28>>2],tm_isdst:HEAP32[tm+32>>2],tm_gmtoff:HEAP32[tm+36>>2],tm_zone:tm_zone?UTF8ToString(tm_zone):""};var pattern=UTF8ToString(format);var EXPANSION_RULES_1={"%c":"%a %b %d %H:%M:%S %Y","%D":"%m/%d/%y","%F":"%Y-%m-%d","%h":"%b","%r":"%I:%M:%S %p","%R":"%H:%M","%T":"%H:%M:%S","%x":"%m/%d/%y","%X":"%H:%M:%S","%Ec":"%c","%EC":"%C","%Ex":"%m/%d/%y","%EX":"%H:%M:%S","%Ey":"%y","%EY":"%Y","%Od":"%d","%Oe":"%e","%OH":"%H","%OI":"%I","%Om":"%m","%OM":"%M","%OS":"%S","%Ou":"%u","%OU":"%U","%OV":"%V","%Ow":"%w","%OW":"%W","%Oy":"%y"};for(var rule in EXPANSION_RULES_1){pattern=pattern.replace(new RegExp(rule,"g"),EXPANSION_RULES_1[rule])}var WEEKDAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];var MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];function leadingSomething(value,digits,character){var str=typeof value=="number"?value.toString():value||"";while(str.length<digits){str=character[0]+str}return str}function leadingNulls(value,digits){return leadingSomething(value,digits,"0")}function compareByDay(date1,date2){function sgn(value){return value<0?-1:value>0?1:0}var compare;if((compare=sgn(date1.getFullYear()-date2.getFullYear()))===0){if((compare=sgn(date1.getMonth()-date2.getMonth()))===0){compare=sgn(date1.getDate()-date2.getDate())}}return compare}function getFirstWeekStartDate(janFourth){switch(janFourth.getDay()){case 0:return new Date(janFourth.getFullYear()-1,11,29);case 1:return janFourth;case 2:return new Date(janFourth.getFullYear(),0,3);case 3:return new Date(janFourth.getFullYear(),0,2);case 4:return new Date(janFourth.getFullYear(),0,1);case 5:return new Date(janFourth.getFullYear()-1,11,31);case 6:return new Date(janFourth.getFullYear()-1,11,30)}}function getWeekBasedYear(date){var thisDate=addDays(new Date(date.tm_year+1900,0,1),date.tm_yday);var janFourthThisYear=new Date(thisDate.getFullYear(),0,4);var janFourthNextYear=new Date(thisDate.getFullYear()+1,0,4);var firstWeekStartThisYear=getFirstWeekStartDate(janFourthThisYear);var firstWeekStartNextYear=getFirstWeekStartDate(janFourthNextYear);if(compareByDay(firstWeekStartThisYear,thisDate)<=0){if(compareByDay(firstWeekStartNextYear,thisDate)<=0){return thisDate.getFullYear()+1}return thisDate.getFullYear()}return thisDate.getFullYear()-1}var EXPANSION_RULES_2={"%a":function(date){return WEEKDAYS[date.tm_wday].substring(0,3)},"%A":function(date){return WEEKDAYS[date.tm_wday]},"%b":function(date){return MONTHS[date.tm_mon].substring(0,3)},"%B":function(date){return MONTHS[date.tm_mon]},"%C":function(date){var year=date.tm_year+1900;return leadingNulls(year/100|0,2)},"%d":function(date){return leadingNulls(date.tm_mday,2)},"%e":function(date){return leadingSomething(date.tm_mday,2," ")},"%g":function(date){return getWeekBasedYear(date).toString().substring(2)},"%G":function(date){return getWeekBasedYear(date)},"%H":function(date){return leadingNulls(date.tm_hour,2)},"%I":function(date){var twelveHour=date.tm_hour;if(twelveHour==0)twelveHour=12;else if(twelveHour>12)twelveHour-=12;return leadingNulls(twelveHour,2)},"%j":function(date){return leadingNulls(date.tm_mday+arraySum(isLeapYear(date.tm_year+1900)?MONTH_DAYS_LEAP:MONTH_DAYS_REGULAR,date.tm_mon-1),3)},"%m":function(date){return leadingNulls(date.tm_mon+1,2)},"%M":function(date){return leadingNulls(date.tm_min,2)},"%n":function(){return"\n"},"%p":function(date){if(date.tm_hour>=0&&date.tm_hour<12){return"AM"}return"PM"},"%S":function(date){return leadingNulls(date.tm_sec,2)},"%t":function(){return"\t"},"%u":function(date){return date.tm_wday||7},"%U":function(date){var days=date.tm_yday+7-date.tm_wday;return leadingNulls(Math.floor(days/7),2)},"%V":function(date){var val=Math.floor((date.tm_yday+7-(date.tm_wday+6)%7)/7);if((date.tm_wday+371-date.tm_yday-2)%7<=2){val++}if(!val){val=52;var dec31=(date.tm_wday+7-date.tm_yday-1)%7;if(dec31==4||dec31==5&&isLeapYear(date.tm_year%400-1)){val++}}else if(val==53){var jan1=(date.tm_wday+371-date.tm_yday)%7;if(jan1!=4&&(jan1!=3||!isLeapYear(date.tm_year)))val=1}return leadingNulls(val,2)},"%w":function(date){return date.tm_wday},"%W":function(date){var days=date.tm_yday+7-(date.tm_wday+6)%7;return leadingNulls(Math.floor(days/7),2)},"%y":function(date){return(date.tm_year+1900).toString().substring(2)},"%Y":function(date){return date.tm_year+1900},"%z":function(date){var off=date.tm_gmtoff;var ahead=off>=0;off=Math.abs(off)/60;off=off/60*100+off%60;return(ahead?"+":"-")+String("0000"+off).slice(-4)},"%Z":function(date){return date.tm_zone},"%%":function(){return"%"}};pattern=pattern.replace(/%%/g,"\0\0");for(var rule in EXPANSION_RULES_2){if(pattern.includes(rule)){pattern=pattern.replace(new RegExp(rule,"g"),EXPANSION_RULES_2[rule](date))}}pattern=pattern.replace(/\0\0/g,"%");var bytes=intArrayFromString(pattern,false);if(bytes.length>maxsize){return 0}writeArrayToMemory(bytes,s);return bytes.length-1}function _strftime_l(s,maxsize,format,tm,loc){return _strftime(s,maxsize,format,tm)}function _proc_exit(code){EXITSTATUS=code;if(!keepRuntimeAlive()){if(Module["onExit"])Module["onExit"](code);ABORT=true}quit_(code,new ExitStatus(code))}function exitJS(status,implicit){EXITSTATUS=status;_proc_exit(status)}function handleException(e){if(e instanceof ExitStatus||e=="unwind"){return EXITSTATUS}quit_(1,e)}function getCFunc(ident){var func=Module["_"+ident];return func}function stringToUTF8(str,outPtr,maxBytesToWrite){return stringToUTF8Array(str,HEAPU8,outPtr,maxBytesToWrite)}function stringToUTF8OnStack(str){var size=lengthBytesUTF8(str)+1;var ret=stackAlloc(size);stringToUTF8(str,ret,size);return ret}function ccall(ident,returnType,argTypes,args,opts){var toC={"string":str=>{var ret=0;if(str!==null&&str!==undefined&&str!==0){ret=stringToUTF8OnStack(str)}return ret},"array":arr=>{var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string"){return UTF8ToString(ret)}if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i])}else{cArgs[i]=args[i]}}}var ret=func.apply(null,cArgs);function onDone(ret){if(stack!==0)stackRestore(stack);return convertReturnValue(ret)}ret=onDone(ret);return ret}function cwrap(ident,returnType,argTypes,opts){var numericArgs=!argTypes||argTypes.every(type=>type==="number"||type==="boolean");var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return function(){return ccall(ident,returnType,argTypes,arguments,opts)}}function uleb128Encode(n,target){if(n<128){target.push(n)}else{target.push(n%128|128,n>>7)}}function sigToWasmTypes(sig){var typeNames={"i":"i32","j":"i32","f":"f32","d":"f64","p":"i32"};var type={parameters:[],results:sig[0]=="v"?[]:[typeNames[sig[0]]]};for(var i=1;i<sig.length;++i){type.parameters.push(typeNames[sig[i]]);if(sig[i]==="j"){type.parameters.push("i32")}}return type}function generateFuncType(sig,target){var sigRet=sig.slice(0,1);var sigParam=sig.slice(1);var typeCodes={"i":127,"p":127,"j":126,"f":125,"d":124};target.push(96);uleb128Encode(sigParam.length,target);for(var i=0;i<sigParam.length;++i){target.push(typeCodes[sigParam[i]])}if(sigRet=="v"){target.push(0)}else{target.push(1,typeCodes[sigRet])}}function convertJsFunctionToWasm(func,sig){if(typeof WebAssembly.Function=="function"){return new WebAssembly.Function(sigToWasmTypes(sig),func)}var typeSectionBody=[1];generateFuncType(sig,typeSectionBody);var bytes=[0,97,115,109,1,0,0,0,1];uleb128Encode(typeSectionBody.length,bytes);bytes.push.apply(bytes,typeSectionBody);bytes.push(2,7,1,1,101,1,102,0,0,7,5,1,1,102,0,0);var module=new WebAssembly.Module(new Uint8Array(bytes));var instance=new WebAssembly.Instance(module,{"e":{"f":func}});var wrappedFunc=instance.exports["f"];return wrappedFunc}function getWasmTableEntry(funcPtr){return wasmTable.get(funcPtr)}function updateTableMap(offset,count){if(functionsInTableMap){for(var i=offset;i<offset+count;i++){var item=getWasmTableEntry(i);if(item){functionsInTableMap.set(item,i)}}}}var functionsInTableMap=undefined;function getFunctionAddress(func){if(!functionsInTableMap){functionsInTableMap=new WeakMap;updateTableMap(0,wasmTable.length)}return functionsInTableMap.get(func)||0}var freeTableIndexes=[];function getEmptyTableSlot(){if(freeTableIndexes.length){return freeTableIndexes.pop()}try{wasmTable.grow(1)}catch(err){if(!(err instanceof RangeError)){throw err}throw"Unable to grow wasm table. Set ALLOW_TABLE_GROWTH."}return wasmTable.length-1}function setWasmTableEntry(idx,func){wasmTable.set(idx,func)}function addFunction(func,sig){var rtn=getFunctionAddress(func);if(rtn){return rtn}var ret=getEmptyTableSlot();try{setWasmTableEntry(ret,func)}catch(err){if(!(err instanceof TypeError)){throw err}var wrapped=convertJsFunctionToWasm(func,sig);setWasmTableEntry(ret,wrapped)}functionsInTableMap.set(func,ret);return ret}var FSNode=function(parent,name,mode,rdev){if(!parent){parent=this}this.parent=parent;this.mount=parent.mount;this.mounted=null;this.id=FS.nextInode++;this.name=name;this.mode=mode;this.node_ops={};this.stream_ops={};this.rdev=rdev};var readMode=292|73;var writeMode=146;Object.defineProperties(FSNode.prototype,{read:{get:function(){return(this.mode&readMode)===readMode},set:function(val){val?this.mode|=readMode:this.mode&=~readMode}},write:{get:function(){return(this.mode&writeMode)===writeMode},set:function(val){val?this.mode|=writeMode:this.mode&=~writeMode}},isFolder:{get:function(){return FS.isDir(this.mode)}},isDevice:{get:function(){return FS.isChrdev(this.mode)}}});FS.FSNode=FSNode;FS.staticInit();var wasmImports={"a":_abort,"j":_emscripten_memcpy_big,"i":_emscripten_resize_heap,"d":_environ_get,"e":_environ_sizes_get,"f":_fd_close,"g":_fd_read,"h":_fd_seek,"b":_fd_write,"c":_strftime_l};var asm=createWasm();var ___wasm_call_ctors=function(){return(___wasm_call_ctors=Module["asm"]["l"]).apply(null,arguments)};var _init=Module["_init"]=function(){return(_init=Module["_init"]=Module["asm"]["m"]).apply(null,arguments)};var _execute=Module["_execute"]=function(){return(_execute=Module["_execute"]=Module["asm"]["n"]).apply(null,arguments)};var _setTrigger=Module["_setTrigger"]=function(){return(_setTrigger=Module["_setTrigger"]=Module["asm"]["o"]).apply(null,arguments)};var _getTime=Module["_getTime"]=function(){return(_getTime=Module["_getTime"]=Module["asm"]["p"]).apply(null,arguments)};var _main=Module["_main"]=function(){return(_main=Module["_main"]=Module["asm"]["q"]).apply(null,arguments)};var ___errno_location=function(){return(___errno_location=Module["asm"]["__errno_location"]).apply(null,arguments)};var stackSave=function(){return(stackSave=Module["asm"]["s"]).apply(null,arguments)};var stackRestore=function(){return(stackRestore=Module["asm"]["t"]).apply(null,arguments)};var stackAlloc=function(){return(stackAlloc=Module["asm"]["u"]).apply(null,arguments)};Module["addOnPostRun"]=addOnPostRun;Module["ccall"]=ccall;Module["cwrap"]=cwrap;Module["addFunction"]=addFunction;Module["setValue"]=setValue;Module["getValue"]=getValue;var calledRun;dependenciesFulfilled=function runCaller(){if(!calledRun)run();if(!calledRun)dependenciesFulfilled=runCaller};function callMain(){var entryFunction=_main;var argc=0;var argv=0;try{var ret=entryFunction(argc,argv);exitJS(ret,true);return ret}catch(e){return handleException(e)}}function run(){if(runDependencies>0){return}preRun();if(runDependencies>0){return}function doRun(){if(calledRun)return;calledRun=true;Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();readyPromiseResolve(Module);if(Module["onRuntimeInitialized"])Module["onRuntimeInitialized"]();if(shouldRunNow)callMain();postRun()}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(function(){setTimeout(function(){Module["setStatus"]("")},1);doRun()},1)}else{doRun()}}if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].pop()()}}var shouldRunNow=true;if(Module["noInitialRun"])shouldRunNow=false;run();
+
+
+  return createVCD.ready
+}
+
+);
+})();
+if (typeof exports === 'object' && typeof module === 'object')
+  module.exports = createVCD;
+else if (typeof define === 'function' && define['amd'])
+  define([], function() { return createVCD; });
+else if (typeof exports === 'object')
+  exports["createVCD"] = createVCD;
+
+}).call(this)}).call(this,require('_process'),require("buffer").Buffer,"/node_modules/vcd-stream/out/vcd.js",arguments[3],arguments[4],arguments[5],arguments[6],"/node_modules/vcd-stream/out")
+},{"_process":197,"buffer":101,"crypto":109,"fs":99,"path":190}],243:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+var base = {
+  8: "Backspace",
+  9: "Tab",
+  10: "Enter",
+  12: "NumLock",
+  13: "Enter",
+  16: "Shift",
+  17: "Control",
+  18: "Alt",
+  20: "CapsLock",
+  27: "Escape",
+  32: " ",
+  33: "PageUp",
+  34: "PageDown",
+  35: "End",
+  36: "Home",
+  37: "ArrowLeft",
+  38: "ArrowUp",
+  39: "ArrowRight",
+  40: "ArrowDown",
+  44: "PrintScreen",
+  45: "Insert",
+  46: "Delete",
+  59: ";",
+  61: "=",
+  91: "Meta",
+  92: "Meta",
+  106: "*",
+  107: "+",
+  108: ",",
+  109: "-",
+  110: ".",
+  111: "/",
+  144: "NumLock",
+  145: "ScrollLock",
+  160: "Shift",
+  161: "Shift",
+  162: "Control",
+  163: "Control",
+  164: "Alt",
+  165: "Alt",
+  173: "-",
+  186: ";",
+  187: "=",
+  188: ",",
+  189: "-",
+  190: ".",
+  191: "/",
+  192: "`",
+  219: "[",
+  220: "\\",
+  221: "]",
+  222: "'"
+};
+
+var shift = {
+  48: ")",
+  49: "!",
+  50: "@",
+  51: "#",
+  52: "$",
+  53: "%",
+  54: "^",
+  55: "&",
+  56: "*",
+  57: "(",
+  59: ":",
+  61: "+",
+  173: "_",
+  186: ":",
+  187: "+",
+  188: "<",
+  189: "_",
+  190: ">",
+  191: "?",
+  192: "~",
+  219: "{",
+  220: "|",
+  221: "}",
+  222: "\""
+};
+
+var mac = typeof navigator != "undefined" && /Mac/.test(navigator.platform);
+var ie = typeof navigator != "undefined" && /MSIE \d|Trident\/(?:[7-9]|\d{2,})\..*rv:(\d+)/.exec(navigator.userAgent);
+
+// Fill in the digit keys
+for (var i = 0; i < 10; i++) base[48 + i] = base[96 + i] = String(i);
+
+// The function keys
+for (var i = 1; i <= 24; i++) base[i + 111] = "F" + i;
+
+// And the alphabetic keys
+for (var i = 65; i <= 90; i++) {
+  base[i] = String.fromCharCode(i + 32);
+  shift[i] = String.fromCharCode(i);
+}
+
+// For each code that doesn't have a shift-equivalent, copy the base name
+for (var code in base) if (!shift.hasOwnProperty(code)) shift[code] = base[code];
+
+function keyName(event) {
+  // On macOS, keys held with Shift and Cmd don't reflect the effect of Shift in `.key`.
+  // On IE, shift effect is never included in `.key`.
+  var ignoreKey = mac && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey ||
+      ie && event.shiftKey && event.key && event.key.length == 1 ||
+      event.key == "Unidentified";
+  var name = (!ignoreKey && event.key) ||
+    (event.shiftKey ? shift : base)[event.keyCode] ||
+    event.key || "Unidentified";
+  // Edge sometimes produces wrong names (Issue #3)
+  if (name == "Esc") name = "Escape";
+  if (name == "Del") name = "Delete";
+  // https://developer.microsoft.com/en-us/microsoft-edge/platform/issues/8860571/
+  if (name == "Left") name = "ArrowLeft";
+  if (name == "Up") name = "ArrowUp";
+  if (name == "Right") name = "ArrowRight";
+  if (name == "Down") name = "ArrowDown";
+  return name
+}
+
+exports.base = base;
+exports.keyName = keyName;
+exports.shift = shift;
+
+},{}],244:[function(require,module,exports){
+'use strict';
+
+const {EditorState} = require('@codemirror/state');
+const {highlightActiveLine, keymap, gutter} = require('@codemirror/view');
+const {history, defaultKeymap, historyKeymap} = require('@codemirror/commands');
+const {completionKeymap, autocompletion} = require('@codemirror/autocomplete');
+
+const extMainTheme = require('./ext-main-theme.js');
+const extReadOnlyTogglerWith = require('./ext-read-only-toggler-with.js');
+const extWaveqlLangWith = require('./ext-waveql-lang-with.js');
+const extChangeWith = require('./ext-change-with.js');
+const waveqlCompletionsWith = require('./waveql-completions-with.js');
+const dictionary = require('./dictionary.js');
+
+const createCodeMirrorState = (deso, pstate, extensions) =>
+  EditorState.create({
+    doc: deso.waveql,
+    extensions: [
+      // history(),
+      ...(deso.hasHistory ? [history()] : []),
+      highlightActiveLine(),
+      keymap.of([
+        // no Tabs https://codemirror.net/examples/tab/
+        ...completionKeymap,
+        ...defaultKeymap,
+        ...(deso.hasHistory ? historyKeymap : [])
+      ]),
+      extMainTheme,
+      extWaveqlLangWith(deso.wires, dictionary),
+      autocompletion({override: [waveqlCompletionsWith(deso, pstate)]}),
+      extChangeWith(deso, pstate),
+      extReadOnlyTogglerWith('Alt-/', deso.isRO ? true : false),
+      // extEdiatableTogglerWith('Alt-/', true),
+      gutter({class: 'cm-wd-gutter'}),
+      ...(extensions || [])
+    ]
+  });
+
+module.exports = createCodeMirrorState;
+
+/* eslint-env browser */
+
+},{"./dictionary.js":245,"./ext-change-with.js":246,"./ext-main-theme.js":247,"./ext-read-only-toggler-with.js":248,"./ext-waveql-lang-with.js":249,"./waveql-completions-with.js":257,"@codemirror/autocomplete":2,"@codemirror/commands":3,"@codemirror/state":5,"@codemirror/view":6}],245:[function(require,module,exports){
+'use strict';
+
+const get = require('./get-sig.js');
+const tracePath = require('./trace-path.js');
+
+const dict = [
+
+  {m: '(DIZ', fn: (stream, stt, mat, wires) => {
+    stream.eatSpace();
+    const arg1 = stream.match(/^(\S+)(\s+|$)/);
+    if (arg1) {
+      let rex;
+      try {
+        rex = new RegExp(arg1[1]);
+      } catch (err) {
+        return 'comment';
+      }
+      const rowo = stt.rowo;
+      const clock = stt.labelo.clock;
+      if (clock === undefined) {
+        return 'comment';
+      }
+      rowo.kind = 'DIZ';
+      rowo.clock = stt.labelo.clock;
+
+      const levelo = get(wires, stt.path, false);
+      const othero0 = levelo.body.reduce((res, ero) => {
+        const m = ero.name.match(rex);
+        if (m && m.groups && m.groups.id) {
+          const {id, pc, go} = m.groups;
+          const stage = res[id] = (res[id] || {});
+          const desc = {name: ero.name, ref: ero.link};
+          if (pc) {
+            stage[pc] = desc;
+          } else
+          if (go) {
+            stage[go] = desc;
+          }
+        }
+        return res;
+      }, {});
+      // filter out singles
+      const othero = Object.keys(othero0).reduce((res, name) => {
+        const val = othero0[name];
+        if (val.pc && val.go) {
+          res[name] = val;
+        }
+        return res;
+      }, {});
+      rowo.othero = othero;
+      stt.rStack.push(rowo);
+      return 'macroName';
+    }
+    return 'comment';
+  }},
+
+  {m: '/', fn: (stream, stt) => {
+    stt.path.length = 0;
+    tracePath(stream, stt);
+    return 'punctuation';
+  }},
+
+  {m: '.', fn: (/* stream, stt */) => {
+    return 'punctuation';
+  }},
+
+  {m: '..', fn: (stream, stt) => {
+    stt.path.pop();
+    tracePath(stream, stt);
+    return 'punctuation';
+  }},
+
+  {m: '...', fn: (stream, stt) => {
+    stt.path.pop();
+    stt.path.pop();
+    tracePath(stream, stt);
+    return 'punctuation';
+  }},
+
+  {m: '//', fn: (stream /*, stt */) => {
+    stream.skipToEnd();
+    return 'comment';
+  }},
+
+  {m: ')', fn: (stream, stt) => {
+    const {rStack} = stt;
+    const rTop = rStack.pop();
+    if (rTop) {
+      rTop.len = stt.rowo.idx - rTop.idx + 1;
+      return 'macroName';
+    }
+    return 'comment';
+  }},
+
+  {m: /^@(?<value>\d+)(?<mult>[munpf]*s)(\.(?<style>\w+))?$/, fn: (stream, stt, mat) => {
+    const scale = {
+      's': 0,
+      'ms': -3,
+      'us': -6,
+      'ns': -9,
+      'ps': -12,
+      'fs': -15
+    };
+    const rowo = stt.rowo;
+    rowo.vlines = rowo.vlines || [];
+    rowo.vlines.push({
+      value: Number(mat.groups.value),
+      mult: scale[mat.groups.mult],
+      style: mat.groups.style
+    });
+    return 'unit';
+  }},
+
+  {m: /^%(?<align>[<>^])?(?<plus>[+-])?(?<sign>[su])?(?<radix>[bodhHac])$/, fn: (stream, stt, mat) => {
+    stt.rowo.format = mat.groups;
+    return 'attributeName';
+  }},
+
+  {m: /^:(?<name>\S+)(\s+|$)/, fn: (stream, stt, mat) => {
+    stt.labelo[mat.groups.name] = stt.rowo;
+    return 'labelName';
+  }},
+
+  {m: /^\{(?<body>[^}]+)\}$/, fn: (stream, stt, mat) => {
+    const a = mat.groups.body;
+    const b = a.split(',');
+    const body = b.reduce((res, e) => {
+      const ee = e.split(':');
+      const [key, val] = ee;
+      if (ee.length === 2) {
+        const sig = stt.labelo[val] || Number(val);
+        res[key] = sig;
+      } else
+      if (ee.length === 1) {
+        res[key] = stt.labelo[key] || {};
+      }
+      return res;
+    }, {});
+    stt.rowo.kind = 'brace';
+    stt.rowo.body = body;
+    return 'brace';
+  }}
+
+];
+
+module.exports = dict;
+
+},{"./get-sig.js":251,"./trace-path.js":256}],246:[function(require,module,exports){
+'use strict';
+
+const {EditorView} = require('@codemirror/view');
+
+const langParser = require('./lang-parser.js');
+const waveQlLang = require('./waveql-lang.js');
+const dictionary = require('./dictionary.js');
+
+const extChangeWith = (deso, pstate) => {
+  const updater = deso.updater || (() => {});
+  const lang = waveQlLang(deso.wires, dictionary);
+  return EditorView.updateListener.of((update) => {
+    if (update.docChanged) {
+      const str = update.state.doc.toString();
+      const parser = langParser(lang);
+      const stt = parser(str);
+      deso.view = stt.rows;
+      pstate.numLanes = deso.view.length;
+      pstate.pathTrace = stt.pathTrace;
+      updater(str);
+      deso.render();
+    }
+  });
+};
+
+module.exports = extChangeWith;
+
+},{"./dictionary.js":245,"./lang-parser.js":254,"./waveql-lang.js":258,"@codemirror/view":6}],247:[function(require,module,exports){
+'use strict';
+
+const {EditorView} = require('@codemirror/view');
+
+// https://codemirror.net/examples/styling/
+
+const sidebarStylo = {
+  '&': {
+    color: '#eee',
+    backgroundColor: '#0000001c',
+    // top: '20px',
+    // display: 'block',
+    height: '100%', // codemirror to fill vertical space
+    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
+    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
+    // height: 'calc(100% - 40px)',
+    // left: '0px',
+    // overflow: 'hidden',
+    'scrollbar-width': 'thin',          /* "auto" or "thin" */
+    'scrollbar-color': 'blue orange'    /* scroll thumb and track */   // padding: 0px;
+  },
+  '.cm-gutters': {
+    backgroundColor: '#00000000'
+  },
+  '.cm-wd-gutter': {
+    width: 8
+  },
+  '.cm-editor': {
+    // display: 'block',
+    // height: 'calc(100% - 40px)',
+    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
+    // maxHeight: '100%', // editor grow until it reaches a maximum height, and scroll from that point on
+    // height: '100%', // codemirror to fill vertical space
+    // minHeight: '100%',
+    // maxHeight: '100%'
+  },
+  '.cm-content': {
+    // caretColor: '#3ff',
+    fontFamily: 'Iosevka Drom Web',
+    lineHeight: 1.5,
+    fontSize: '16px',
+    width: '100%'
+    // top: '20px',
+    // bottom: '20px'
+  },
+  '.cm-scroller': {
+    maxHeight: '100%', // editor grow until it reaches a maximum height, and scroll from that point on
+    // maxHeight: 'calc(100% - 40px)', // editor grow until it reaches a maximum height, and scroll from that point on
+    // overflowY: 'auto',
+    overflowX: 'hidden'
+  },
+  '.cm-activeLine': {
+    backgroundColor: '#00aaff10'
+  },
+  '.cm-completionIcon-scope-module':  {'&:after': {content: '"M"', 'font-style': 'italic' } },
+  '.cm-completionIcon-scope-class':   {'&:after': {content: '"C"', 'font-style': 'italic' } },
+  '.cm-completionIcon-scope-other':   {'&:after': {content: '"O"', 'font-style': 'italic' } },
+
+  '.cm-completionIcon-var-parameter': {'&:after': {content: '"p"'} },
+  '.cm-completionIcon-var-reg':       {'&:after': {content: '"r"'} },
+  '.cm-completionIcon-var-wire':      {'&:after': {content: '"w"'} },
+  '.cm-completionIcon-var-other':     {'&:after': {content: '"o"'} }
+};
+
+const extMainTheme = EditorView.theme(sidebarStylo, {dark: true});
+
+module.exports = extMainTheme;
+
+},{"@codemirror/view":6}],248:[function(require,module,exports){
+'use strict';
+
+const {EditorState, Compartment} = require('@codemirror/state');
+const {keymap, EditorView} = require('@codemirror/view');
+
+// https://codemirror.net/docs/ref/#state.EditorState.readOnly
+// https://codemirror.net/examples/config/#dynamic-configuration
+
+const roFlag = new Compartment;
+const roStyle = new Compartment;
+
+const rw = EditorView.contentAttributes.of({
+  style: 'caret-color: #11ffbb'
+});
+
+const ro = EditorView.contentAttributes.of({
+  style: 'caret-color: #ff5500'
+});
+
+const toggleEditability = (eView) => {
+  const r = eView.state.readOnly;
+  eView.dispatch({
+    effects: [
+      roFlag.reconfigure(EditorState.readOnly.of(!r)),
+      roStyle.reconfigure(r ? rw : ro)
+    ]
+  });
+};
+
+const extReadOnlyTogglerWith = (key, initialValue) => [
+  roFlag.of(EditorState.readOnly.of(initialValue)),
+  roStyle.of(initialValue ? ro : rw),
+  keymap.of([{key, run: toggleEditability, preventDefault: true}])
+];
+
+module.exports = extReadOnlyTogglerWith;
+
+},{"@codemirror/state":5,"@codemirror/view":6}],249:[function(require,module,exports){
+'use strict';
+
+const {StreamLanguage, syntaxHighlighting, HighlightStyle} = require('@codemirror/language');
+const {tags} = require('@lezer/highlight');
+const waveQlLang = require('./waveql-lang.js');
+
+// waveql syntax
+// https://codemirror.net/docs/ref/#language.StreamLanguage
+
+// https://github.com/lezer-parser/highlight/blob/main/src/highlight.ts
+
+const sidebarHighlightStyleGen = t => [
+
+  // $var
+  {tag: [t.variableName],   background: '#000', color: 'hsl(50,  100%, 25%)'},
+  {tag: [t.macroName],      background: '#000', color: 'hsl(200, 100%, 30%)'},
+  {tag: [t.bool],           background: '#000', color: 'hsl(60,  100%, 70%)'},
+  {tag: [t.atom],           background: '#000', color: 'hsl(30,  100%, 70%)'},
+
+  // $scope
+  {tag: [t.namespace],      background: '#000', color: 'hsl(302, 100%, 25%)', fontStyle: 'italic'},
+  {tag: [t.meta],           background: '#000', color: 'hsl(120, 100%, 80%)', fontStyle: 'italic'},
+  {tag: [t.className],      background: '#000', color: 'hsl(322, 100%, 36%)', fontStyle: 'italic'},
+
+  {tag: [t.punctuation],    background: '#000'},
+  {tag: [t.labelName],      background: '#000', color: 'hsl(175, 100%, 86%)', fontWeight: 'bold'},
+  {tag: [t.attributeName],  background: '#000', color: 'hsl(202, 100%, 66%)', fontWeight: 'bold'},
+  {tag: [t.brace],          background: '#000', color: 'hsl(278, 100%, 79%)', fontWeight: 'bold'},
+  {tag: [t.unit],           background: '#000', color: 'hsl(333, 100%, 80%)'},
+  {tag: [t.comment],        background: '#000', color: 'hsl(0, 0%, 50%)'}
+];
+
+// textDecoration: 'underline',
+// textUnderlinePosition: 'under'
+// textDecoration: 'line-through'
+
+const extWaveqlLangWith = (wires, dict) => {
+  return [
+    StreamLanguage.define(waveQlLang(wires, dict)),
+    syntaxHighlighting(HighlightStyle.define(sidebarHighlightStyleGen(tags)))
+  ];
+};
+
+module.exports = extWaveqlLangWith;
+
+},{"./waveql-lang.js":258,"@codemirror/language":4,"@lezer/highlight":8}],250:[function(require,module,exports){
+'use strict';
+
+const getScopeType = (key) => {
+  const lut = {
+    module:     {id: 0,   tag: 'meta', icon: 'module', term: 'scopeModule'}
+    // task:       {id: 1,   tag: 'namespace'},
+    // function:   {id: 2,   tag: 'namespace'},
+    // begin:      {id: 3,   tag: 'namespace'},
+    // fork:       {id: 4,   tag: 'namespace'},
+    // extra scopes from Verilator
+    // generate:   {id: 5,   tag: 'namespace'},
+    // struct:     {id: 6,   tag: 'namespace'},
+    // union:      {id: 7,   tag: 'namespace'},
+    // class:      {id: 8,   tag: 'className', icon: 'class'}
+    // interface:  {id: 9,   tag: 'namespace'},
+    // package:    {id: 10,  tag: 'namespace'},
+    // program:    {id: 11,  tag: 'namespace'}
+  };
+  return lut[key] || {tag: 'namespace', icon: 'other', term: 'scopeOther'};
+};
+
+module.exports = getScopeType;
+
+},{}],251:[function(require,module,exports){
+'use strict';
+
+const get = (wires, pat) => {
+  for (let i = 0; i < pat.length; i++) {
+    const ero = wires.body.find(e => e.name === pat[i]);
+    if (ero === undefined) {
+      return false;
+    }
+    wires = ero;
+  }
+  return wires;
+};
+
+module.exports = get;
+
+},{}],252:[function(require,module,exports){
+'use strict';
+
+const getVarType = (key) => {
+  const lut = {
+    // event:      {id: 1,   tag: 'variableName'},
+    // integer:    {id: 2,   tag: 'variableName'},
+    parameter:  {id: 3,   tag: 'macroName', icon: 'parameter'},
+    // real:       {id: 4,   tag: 'variableName'},
+    // realtime:   {id: 5,   tag: 'variableName'},
+    reg:        {id: 6,   tag: 'atom', icon: 'reg', term: 'varReg'},
+    // supply0:    {id: 7,   tag: 'variableName'},
+    // supply1:    {id: 8,   tag: 'variableName'},
+    // time:       {id: 9,   tag: 'variableName'},
+    // tri:        {id: 10,  tag: 'variableName'},
+    // triand:     {id: 11,  tag: 'variableName'},
+    // trior:      {id: 12,  tag: 'variableName'},
+    // trireg:     {id: 13,  tag: 'variableName'},
+    // tri0:       {id: 14,  tag: 'variableName'},
+    // tri1:       {id: 15,  tag: 'variableName'},
+    // wand:       {id: 16,  tag: 'variableName'},
+    wire:       {id: 17,  tag: 'bool', icon: 'wire', term: 'varWire'}
+    // wor:        {id: 18,  tag: 'variableName'}
+  };
+  return lut[key] || {tag: 'variableName', icon: 'other', term: 'varOther'};
+};
+
+module.exports = getVarType;
+
+},{}],253:[function(require,module,exports){
+'use strict';
+
+const pkg = require('../package.json');
+const langParser = require('./lang-parser.js');
+const waveQlLang = require('./waveql-lang.js');
+const mountCodeMirror6 = require('./mount-codemirror6.js');
+const createCodeMirrorState = require('./create-code-mirror-state.js');
+
+exports.version = pkg.version;
+exports.langParser = langParser;
+exports.waveQlLang = waveQlLang;
+exports.mountCodeMirror6 = mountCodeMirror6;
+exports.createCodeMirrorState = createCodeMirrorState;
+
+},{"../package.json":259,"./create-code-mirror-state.js":244,"./lang-parser.js":254,"./mount-codemirror6.js":255,"./waveql-lang.js":258}],254:[function(require,module,exports){
+'use strict';
+
+const defineStream = (string, rowOffset) => {
+  const stream = {string, rowOffset, pos: 0};
+
+  stream.match = (regx, consume) => {
+    const sub = stream.string.slice(stream.pos);
+    const m = sub.match(regx);
+    if (m && ((consume === undefined) || (consume === true))) {
+      stream.pos += m[0].length;
+    }
+    return m;
+  };
+
+  stream.skipToEnd = () => {
+    stream.pos = stream.string.length;
+  };
+
+  stream.eatSpace = () => {
+    const sub = stream.string.slice(stream.pos);
+    const m = sub.match(/^\s+/);
+    if (m) {
+      stream.pos += m[0].length;
+      return true;
+    }
+  };
+
+  return stream;
+};
+
+const langParser = (lang) => {
+  const stt = lang.startState();
+  return (string) => {
+    // stream.string = string;
+    let rowOffset = 0;
+    const rows = string.split(/\n/);
+    for (const row of rows) {
+      if (row === '') {
+        lang.blankLine(stt);
+      } else {
+        const stream = defineStream(row, rowOffset);
+        while (stream.pos < stream.string.length) {
+          lang.token(stream, stt);
+        }
+        rowOffset += row.length;
+      }
+      rowOffset += 1;
+    }
+    return stt;
+  };
+};
+
+module.exports = langParser;
+
+},{}],255:[function(require,module,exports){
+'use strict';
+
+const {EditorView} = require('@codemirror/view');
+
+const mountCodeMirror6 = (sidebarState, sidebar, deso, pstate) => {
+  const view = new EditorView({state: sidebarState, parent: sidebar});
+
+  view.scrollDOM.addEventListener('scroll', () => {
+    const rect = view.contentDOM.getBoundingClientRect();
+    pstate.yOffset = pstate.topBarHeight - rect.top;
+    deso.render();
+  });
+
+  document.addEventListener('scroll', () => {
+    const rect = view.contentDOM.getBoundingClientRect();
+    pstate.yOffset = pstate.topBarHeight - rect.top;
+    deso.render();
+  });
+
+  // dummy change to trigger docChanged event
+  // view.dispatch({changes: {from: 0, insert: ' '}});
+  // view.dispatch({changes: {from: 0, to: 1, insert: ''}});
+
+  return {
+    getScrollInfo: () => {
+      const rect = view.contentDOM.getBoundingClientRect();
+      return {
+        top: rect.top,
+        clientHeight: rect.height
+      };
+    },
+    scrollTo: (/*a, y*/) => {
+    },
+    view,
+    hasFocus: () => view.hasFocus // cm.hasFocus()
+  };
+
+};
+
+module.exports = mountCodeMirror6;
+
+/* eslint-env browser */
+
+},{"@codemirror/view":6}],256:[function(require,module,exports){
+'use strict';
+
+const tracePath = (stream, stt) => {
+  if (stream.rowOffset != undefined) {
+    const offset = stream.rowOffset + stream.pos;
+    stt.pathTrace.push([offset, stt.path]);
+  }
+};
+
+module.exports = tracePath;
+
+
+},{}],257:[function(require,module,exports){
+'use strict';
+
+const getSig = require('./get-sig.js');
+const getScopeType = require('./get-scope-type.js');
+const getVarType = require('./get-var-type.js');
+
+const findPath = (pos, pathTrace) => {
+  let path = [];
+  for (const item of pathTrace) {
+    if (item[0] > pos) {
+      break;
+    }
+    path = item[1];
+  }
+  return path;
+};
+
+// signal autocomplete
+// https://codemirror.net/examples/autocompletion/
+
+const waveqlCompletionsWith = (deso, pstate) => {
+  // const {wires} = deso;
+  return (context /* : CompletionContext */) => {
+    const word = context.matchBefore(/[\w_.()[\]]+/);
+    if (!word || word.from == word.to && !context.explicit) {
+      return null;
+    }
+
+    const path = findPath(word.from, pstate.pathTrace);
+    const scope = getSig(deso.wires, path);
+
+    const options = (scope.body || []).map(ero => {
+      const type = (
+        (ero.kind === 'var') ? ero.kind + '-' + getVarType(ero.type).icon :
+          (ero.kind === 'scope') ? ero.kind + '-' + getScopeType(ero.type).icon :
+            undefined
+      );
+      return {label: ero.name, type};
+    });
+    return {
+      from: word.from,
+      options
+    };
+  };
+};
+
+module.exports = waveqlCompletionsWith;
+
+},{"./get-scope-type.js":250,"./get-sig.js":251,"./get-var-type.js":252}],258:[function(require,module,exports){
+'use strict';
+
+const get = require('./get-sig.js');
+const getScopeType = require('./get-scope-type.js');
+const getVarType = require('./get-var-type.js');
+const tracePath = require('./trace-path.js');
+
+const findSignalWith = (wires) => (stream, stt, word) => {
+  const newPath = stt.path.concat(word);
+  const ero = get(wires, newPath, false);
+  if (ero) {
+    if (ero.kind === 'scope') {
+      stt.path = newPath;
+      tracePath(stream, stt);
+      return (getScopeType(ero.type)).tag;
+    }
+    if (ero.kind === 'var') {
+      // stt.varWidth = ero.size;
+      const rowo = stt.rowo;
+      rowo.width = ero.size;
+      rowo.name = ero.name;
+      rowo.ref = ero.link;
+      return (getVarType(ero.type)).tag;
+    }
+  }
+};
+
+const findInDictionary = (wires) => (stream, stt, word) => {
+  const dict = stt.dict;
+  for (const item of dict) {
+    const m = item.m;
+    if (typeof m === 'string') {
+      if (word === m) {
+        return item.fn(stream, stt, m, wires);
+      }
+    } else {
+      const mat = word.match(m);
+      if (mat) {
+        return item.fn(stream, stt, mat, wires);
+      }
+    }
+  }
+};
+
+const waveQlLang = (wires, dict) => {
+  const finders = [
+    findSignalWith(wires), // instance / signal tree
+    findInDictionary(wires), // direct or regex word match
+    () => 'comment'
+  ];
+  return {
+    startState: function() {
+      return {path: [], dict, rows: [], labelo: {}, rStack: [], pathTrace: []};
+    },
+    blankLine: function (stt) {
+      stt.rows.push({});
+    },
+    token: function (stream, stt) {
+      if (stream.eatSpace()) {
+        return null;
+      }
+      const mat = stream.match(/^(\S+)(\s+|$)/);
+      if (mat) {
+        const word = mat[1];
+        if (stt.curStream !== stream) {
+          stt.curStream = stream;
+          const rowo = stt.rowo = {
+            // raw: stream.string,
+            idx: stt.rows.length
+          };
+          stt.rows.push(rowo);
+        }
+        for (const finder of finders) {
+          const res = finder(stream, stt, word);
+          if (res) {
+            return res;
+          }
+        }
+      } else {
+        throw new Error(stream);
+      }
+    },
+    languageData: {
+      // commentTokens: {line: '//'}
+    }
+  };
+};
+
+module.exports = waveQlLang;
+
+},{"./get-scope-type.js":250,"./get-sig.js":251,"./get-var-type.js":252,"./trace-path.js":256}],259:[function(require,module,exports){
+module.exports={
+  "name": "waveql",
+  "version": "1.7.0",
+  "description": "Waveform Query Language",
+  "homepage": "https://github.com/wavedrom/ql#readme",
+  "author": "Aliaksei Chapyzhenka",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wavedrom/ql.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wavedrom/ql/issues"
+  },
+  "main": "./lib",
+  "unpkg": "waveql.unpkg.min.js",
+  "files": [
+    "lib",
+    "waveql.unpkg.min.js"
+  ],
+  "engines": {
+    "node": ">=12"
+  },
+  "scripts": {
+    "test": "npm run eslint && mocha --inline-diffs test && npm run nyc",
+    "eslint": "eslint lib test",
+    "nyc": "nyc -r=lcov -r=text mocha test",
+    "unpkg": "browserify --standalone waveql lib/index.js > waveql.unpkg.js",
+    "unpkg.min": "terser --compress --mengle -- waveql.unpkg.js > waveql.unpkg.min.js",
+    "watch": "watchify ./lib/app.js -o app/main.js -v"
+  },
+  "_scripts": {
+    "prepare": "npm run unpkg && npm run unpkg.min"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.12.0",
+    "@codemirror/commands": "^6.3.3",
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/state": "^6.4.0",
+    "@codemirror/view": "^6.23.0",
+    "@lezer/highlight": "^1.2.0"
+  },
+  "devDependencies": {
+    "@drom/eslint-config": "^0.12.0",
+    "browserify": "^17.0.0",
+    "chai": "^4.3.6",
+    "coveralls": "^3.1.1",
+    "eslint": "^8.56.0",
+    "live-server": "^1.2.2",
+    "mocha": "^10.2.0",
+    "nyc": "^15.1",
+    "terser": "^5.27.0",
+    "watchify": "^4.0.0"
+  },
+  "eslintConfig": {
+    "extends": "@drom/eslint-config/eslint8/node12"
+  }
+}
+
+},{}],260:[function(require,module,exports){
 module.exports={
   "name": "vcdrom",
   "displayName": "VCDrom",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "VCD viewer for VS Code",
   "main": "vcdrom-main.js",
   "browser": "vcdrom-main.js",
@@ -56937,7 +56892,7 @@ module.exports={
   "devDependencies": {
     "@drom/eslint-config": "^0.12.0",
     "@vscode/test-web": "^0.0.50",
-    "@wavedrom/doppler": "^1.9.0",
+    "@wavedrom/doppler": "^1.10.0",
     "browserify": "^17.0.0",
     "eslint": "^8.56.0",
     "onml": "^2.1.0",
@@ -56963,4 +56918,4 @@ module.exports={
   }
 }
 
-},{}]},{},[72]);
+},{}]},{},[1]);
