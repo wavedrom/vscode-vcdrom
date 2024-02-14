@@ -85,15 +85,15 @@
   "homepage": "https://github.com/wavedrom/vscode-vcdrom#readme",
   "devDependencies": {
     "@drom/eslint-config": "^0.12.0",
-    "@vscode/test-web": "^0.0.50",
-    "@wavedrom/doppler": "^1.10.0",
+    "@vscode/test-web": "^0.0.51",
+    "@wavedrom/doppler": "^1.11.0",
     "browserify": "^17.0.0",
     "eslint": "^8.56.0",
     "onml": "^2.1.0",
     "style-mod": "^4.1.0",
     "vcd-stream": "^1.5.0",
     "watchify": "^4.0.0",
-    "waveql": "^1.7.0"
+    "waveql": "^1.8.0"
   },
   "eslintConfig": {
     "extends": "@drom/eslint-config/eslint8/node12"
