@@ -1,3 +1,7 @@
+## v0.5.0 - 2024-02-14
+
+New data label formats
+
 ## v0.4.0 - 2024-02-01
 
 Fixed WebGL rendering race conditions with requestAnimationFrame
