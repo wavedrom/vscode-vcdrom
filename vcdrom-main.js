@@ -5,12 +5,13 @@ const vscode = require('vscode');
 
 const textDecoder = new TextDecoder('utf-8');
 
+// <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *; style-src * 'unsafe-inline'; worker-src * data: 'unsafe-inline' 'unsafe-eval'; font-src * 'unsafe-inline' 'unsafe-eval';">
+
 const getHtml = obj => `
 <html>
   <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *; style-src * 'unsafe-inline'; worker-src * data: 'unsafe-inline' 'unsafe-eval'; font-src * 'unsafe-inline' 'unsafe-eval';">
-    <script src="${obj.local}/vcdrom-view.js"></script>
+    <script src="${obj.local}/vcdrom.js"></script>
     <style>
       @font-face {
         font-family: 'Iosevka Drom Web';
@@ -48,7 +49,7 @@ const getHtml = obj => `
       }
     </style>
   </head>
-  <body class="vcdrombody" onload="VCDromView('waveform1')">
+  <body class="vcdrombody">
     <div id="waveform1"></div>
   </body>
 </html>
@@ -64,12 +65,11 @@ const addVCD = (/* extensionContext */) => {
       // https://github.com/microsoft/vscode/issues/105299
       // e.title = 'vcd';
       try {
-        const rawContent = await vscode.workspace.fs.readFile(vcd);
-        const vcdText = textDecoder.decode(rawContent);
+        const u8 = await vscode.workspace.fs.readFile(vcd);
         activeVCDromPanel.webview.postMessage({
           kind: 'loadVCD',
           name: vcd.path,
-          text: vcdText
+          u8
         });
       } catch (e) {
         console.warn(`Error reading file ${vcd}`, e);
@@ -193,5 +193,5 @@ exports.deactivate = () => {
   console.log('vcdrom is deactivated!');
 };
 
-},{"vscode":"vscode"}]},{},[1])(1)
+},{"vscode":undefined}]},{},[1])(1)
 });

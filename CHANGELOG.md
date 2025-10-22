@@ -1,3 +1,7 @@
+## v2.0.0-alpha.20251021 - 2025-10-21
+
+Experimental support for VSCode v2
+
 ## v0.5.1 - 2024-02-14
 
 New data label formats

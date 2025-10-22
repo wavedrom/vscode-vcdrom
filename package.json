@@ -1,17 +1,18 @@
 {
   "name": "vcdrom",
-  "displayName": "VCDrom",
-  "version": "0.5.2",
+  "version": "2.0.0-alpha.20251021",
   "description": "VCD viewer for VS Code",
   "main": "vcdrom-main.js",
   "browser": "vcdrom-main.js",
   "publisher": "drom",
-  "engines": {
-    "vscode": "^1.80.0"
-  },
+  "author": "WaveDrom",
+  "license": "MIT",
   "categories": [
     "Visualization"
   ],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
   "icon": "assets/logo.png",
   "activationEvents": [],
   "contributes": {
@@ -65,50 +66,9 @@
     "*.waveql": "waveql"
   },
   "scripts": {
-    "test": "eslint lib/*.js",
-    "browserifyView": "browserify -x vscode lib/vcdrom-view.js > vcdrom-view.js",
-    "browserifyMain": "browserify -x vscode --standalone vcdrom lib/vcdrom-main.js > vcdrom-main.js",
-    "build": "npm run browserifyView && npm run browserifyMain",
-    "watchifyView": "watchify -x vscode lib/vcdrom-view.js -o vcdrom-view.js -v",
-    "watchifyMain": "watchify -x vscode --standalone vcdrom lib/vcdrom-main.js -o vcdrom-main.js -v",
-    "watch": "npm run watchifyView & npm run watchifyMain"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/wavedrom/vscode-vcdrom.git"
-  },
-  "author": "WaveDrom",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/wavedrom/vscode-vcdrom/issues"
-  },
-  "homepage": "https://github.com/wavedrom/vscode-vcdrom#readme",
   "devDependencies": {
-    "@drom/eslint-config": "^0.12.0",
-    "@vscode/test-web": "^0.0.63",
-    "@wavedrom/doppler": "^1.13.0",
-    "browserify": "^17.0.1",
-    "eslint": "^8.57.1",
-    "onml": "^2.1.0",
-    "style-mod": "^4.1.2",
-    "vcd-stream": "^1.5.0",
-    "watchify": "^4.0.0",
-    "waveql": "^1.8.0"
-  },
-  "eslintConfig": {
-    "extends": "@drom/eslint-config/eslint8/node12"
-  },
-  "__metadata": {
-    "id": "30746868-0e7e-4363-872c-6e3ecbc49bbe",
-    "publisherId": "a3b2880c-846b-4e8f-913b-1e14ddad6403",
-    "publisherDisplayName": "Aliaksei Chapyzhenka",
-    "targetPlatform": "undefined",
-    "isApplicationScoped": false,
-    "updated": true,
-    "isPreReleaseVersion": false,
-    "installedTimestamp": 1707953676061,
-    "pinned": false,
-    "preRelease": false,
-    "hasPreReleaseVersion": false
+    "@vscode/test-web": "^0.0.74"
   }
 }
