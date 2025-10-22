@@ -1,6 +1,6 @@
 {
   "name": "vcdrom",
-  "version": "2.0.0-alpha.20251021",
+  "version": "0.6.0",
   "description": "VCD viewer for VS Code",
   "main": "vcdrom-main.js",
   "browser": "vcdrom-main.js",
